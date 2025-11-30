@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'AnneRuth - Cambridge Accounting Notes',
+  title: 'Anneruth - Cambridge Accounting Notes',
   description: 'IGCSE and A-Level Accounting study materials and past papers',
 };
 
