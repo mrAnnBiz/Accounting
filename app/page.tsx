@@ -13,7 +13,7 @@ export default function Home() {
       <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-purple-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
-            📚 AnneRuth
+            Anneruth
           </h1>
           <div className="flex gap-4">
             <Link href="/notes" className="text-gray-700 hover:text-purple-600 font-medium">
@@ -74,9 +74,9 @@ export default function Home() {
       {/* Features */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 grid md:grid-cols-3 gap-8">
         {[
-          { icon: '📖', title: 'Comprehensive Notes', desc: 'Organized by topic and level' },
-          { icon: '📝', title: 'Past Papers', desc: 'Access exam papers and mark schemes' },
-          { icon: '✏️', title: 'Annotations', desc: 'Draw and annotate on papers' },
+          { icon: '', title: 'Comprehensive Notes', desc: 'Organized by topic and level' },
+          { icon: '', title: 'Past Papers', desc: 'Access exam papers and mark schemes' },
+          { icon: '', title: 'Annotations', desc: 'Draw and annotate on papers' },
         ].map((feature, i) => (
           <motion.div
             key={i}
