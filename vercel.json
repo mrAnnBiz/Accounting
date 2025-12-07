@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "app/api/search-papers/route.ts": {
+      "maxDuration": 10
+    },
+    "app/api/pdf-proxy/route.ts": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/papers/:path*",
+      "destination": "/papers/:path*"
+    }
+  ]
+}

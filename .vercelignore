@@ -1,0 +1,12 @@
+# Exclude large PDF files from serverless functions
+public/papers/**
+
+# Exclude development files
+.env.local
+.env.development
+*.log
+node_modules
+
+# Exclude source files that aren't needed in functions
+scripts/
+*.md

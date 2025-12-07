@@ -16,19 +16,14 @@ export interface SearchResult {
   score: number; // Relevance score
 }
 
+// Pre-generated list of PDF files to avoid filesystem reads in serverless functions
+import { papersIndex } from './papers-index';
+
 /**
- * Get all PDF files from the papers directory
+ * Get all PDF files from the pre-generated index
  */
 export function getAllPDFs(): string[] {
-  const papersDir = path.join(process.cwd(), 'public', 'papers');
-  
-  if (!fs.existsSync(papersDir)) {
-    return [];
-  }
-  
-  return fs.readdirSync(papersDir)
-    .filter(file => file.endsWith('.pdf'))
-    .sort();
+  return papersIndex.sort();
 }
 
 /**
