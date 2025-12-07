@@ -2,11 +2,11 @@
 
 import dynamic from 'next/dynamic';
 
-const PDFViewer = dynamic(() => import('@/components/PDFViewerOptimized'), {
+const EnhancedPDFViewerScrollable = dynamic(() => import('@/components/EnhancedPDFViewerScrollable'), {
   ssr: false,
-  loading: () => <div className="min-h-screen flex items-center justify-center">Loading...</div>,
+  loading: () => <div className="flex items-center justify-center h-screen">Loading PDF Viewer...</div>,
 });
 
-export default function PastPapersViewer() {
-  return <PDFViewer />;
+export default function ViewerPage() {
+  return <EnhancedPDFViewerScrollable />;
 }
