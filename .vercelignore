@@ -1,12 +1,11 @@
-# Exclude large PDF files from serverless functions
-public/papers/**
-
 # Exclude development files
 .env.local
 .env.development
 *.log
-node_modules
 
-# Exclude source files that aren't needed in functions
+# Exclude source files that aren't needed
 scripts/
 *.md
+
+# Note: public/papers/ should be deployed as static assets
+# Do NOT exclude public/papers/** - we need these files deployed

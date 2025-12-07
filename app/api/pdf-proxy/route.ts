@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -11,46 +9,62 @@ export async function GET(request: NextRequest) {
   }
 
   // Sanitize the filename to prevent directory traversal
-  const sanitizedPaper = path.basename(paper);
+  const sanitizedPaper = paper.replace(/[^a-zA-Z0-9._-]/g, '');
   if (!sanitizedPaper.endsWith('.pdf')) {
     return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
   }
 
   try {
-    // For development and production, redirect to static file
-    const staticPdfUrl = `/papers/${encodeURIComponent(sanitizedPaper)}`;
+    // Always try to fetch from the static files first
+    const staticPdfUrl = `${request.nextUrl.origin}/papers/${encodeURIComponent(sanitizedPaper)}`;
     
-    // Check if we're in development or if the file should be served statically
-    if (process.env.NODE_ENV === 'development') {
-      // In development, try to read the file directly
-      const papersDir = path.join(process.cwd(), 'public', 'papers');
-      const filePath = path.join(papersDir, sanitizedPaper);
-      
-      if (!fs.existsSync(filePath)) {
-        return NextResponse.json(
-          { error: `PDF file not found: ${sanitizedPaper}` }, 
-          { status: 404 }
-        );
-      }
-
-      const pdfBuffer = fs.readFileSync(filePath);
-      
-      return new NextResponse(pdfBuffer, {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/pdf',
-          'Content-Disposition': `inline; filename="${sanitizedPaper}"`,
-          'Cache-Control': 'public, max-age=3600',
-        },
-      });
-    } else {
-      // In production on Vercel, redirect to the static file
-      return NextResponse.redirect(new URL(staticPdfUrl, request.url));
+    console.log('Fetching PDF from:', staticPdfUrl);
+    
+    // Fetch the PDF file from static assets
+    const response = await fetch(staticPdfUrl, {
+      // Add headers to ensure we get the file
+      headers: {
+        'Accept': 'application/pdf,*/*',
+        'User-Agent': 'PDF-Proxy/1.0',
+      },
+    });
+    
+    console.log('Static file response status:', response.status);
+    console.log('Static file response headers:', Object.fromEntries(response.headers.entries()));
+    
+    if (!response.ok) {
+      console.error(`Failed to fetch PDF: ${response.status} ${response.statusText}`);
+      return NextResponse.json(
+        { 
+          error: `PDF file not found: ${sanitizedPaper}`, 
+          status: response.status,
+          url: staticPdfUrl 
+        }, 
+        { status: 404 }
+      );
     }
+
+    // Get the PDF content as ArrayBuffer
+    const pdfBuffer = await response.arrayBuffer();
+    console.log('PDF buffer size:', pdfBuffer.byteLength);
+    
+    // Return the PDF with proper headers for PDF.js compatibility
+    return new NextResponse(pdfBuffer, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `inline; filename="${sanitizedPaper}"`,
+        'Cache-Control': 'public, max-age=3600',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Content-Length': pdfBuffer.byteLength.toString(),
+      },
+    });
   } catch (error) {
     console.error('Error serving PDF:', error);
     return NextResponse.json(
-      { error: 'Failed to serve PDF' }, 
+      { error: 'Failed to serve PDF', details: error instanceof Error ? error.message : 'Unknown error' }, 
       { status: 500 }
     );
   }

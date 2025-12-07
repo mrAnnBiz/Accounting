@@ -1,10 +1,14 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Optimize for Vercel deployment
+  // Optimize for Vercel deployment - exclude PDFs from function bundles only
   outputFileTracingExcludes: {
-    '*': [
+    // Only exclude from API routes to keep functions small
+    '/api/**/*': [
       'public/papers/**/*',
+    ],
+    // Exclude unnecessary binary files for all routes  
+    '*': [
       'node_modules/@swc/core-linux-x64-gnu',
       'node_modules/@swc/core-linux-x64-musl',
       'node_modules/@esbuild/linux-x64',
@@ -17,8 +21,16 @@ const nextConfig: NextConfig = {
         source: '/papers/:path*',
         headers: [
           {
+            key: 'Content-Type',
+            value: 'application/pdf',
+          },
+          {
             key: 'Cache-Control',
-            value: 'public, max-age=31536000, immutable',
+            value: 'public, max-age=86400',
+          },
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*',
           },
         ],
       },
