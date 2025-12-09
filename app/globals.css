@@ -46,3 +46,37 @@ body {
 .animate-gradient {
   animation: gradient-shift 3s ease infinite;
 }
+
+/* iPad/Tablet annotation mode styles */
+.pdf-viewer-container {
+  touch-action: manipulation; /* Allows two-finger gestures but not pinch zoom on PDFs */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.pdf-viewer-container.annotation-mode {
+  -webkit-touch-callout: none; /* Prevent context menu on long press */
+  touch-action: none; /* Prevent all default touch behaviors during annotation */
+}
+
+/* Stylus-specific styles */
+.pdf-viewer-container.stylus-mode {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Ensure canvas is not affected by text selection */
+canvas {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Allow scrolling when not in annotation mode */
+.pdf-viewer-container:not(.annotation-mode) {
+  touch-action: pan-y pinch-zoom;
+  -webkit-user-select: none;
+  user-select: none;
+}
+

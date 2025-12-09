@@ -54,6 +54,8 @@ const MEMORY_CHECK_INTERVAL = 30000;  // Memory monitoring interval
 const CACHE_CLEANUP_INTERVAL = 60000;  // Cache cleanup interval
 const DEFAULT_PAGE_WIDTH = 595;  // A4 PDF width in points
 const DEFAULT_PAGE_HEIGHT = 842; // A4 PDF height in points
+const LONG_PRESS_THRESHOLD_MS = 500; // Threshold for long press detection (iPad context menu)
+const POINTER_VELOCITY_THRESHOLD = 2; // Velocity threshold to differentiate stylus from finger (pixels/ms)
 
 // ============================================
 // TYPES
@@ -131,6 +133,12 @@ export default function EnhancedPDFViewerScrollable() {
   // Mobile optimization hooks
   const { isMobile, isTablet, orientation, isTouch } = useMobileOptimization();
   const [mobileToolbarVisible, setMobileToolbarVisible] = useState(isMobile || isTablet);
+
+  // iPad touch/stylus handling state
+  const [isStylus, setIsStylus] = useState(false);
+  const [lastTouchPoint, setLastTouchPoint] = useState({ x: 0, y: 0, time: 0 });
+  const [longPressTimeoutRef] = useState<React.MutableRefObject<NodeJS.Timeout | null>>({ current: null });
+  const [touchStartTimeRef] = useState<React.MutableRefObject<number>>({ current: 0 });
 
   // Phase 6: Advanced features state
   const [referencePanelVisible, setReferencePanelVisible] = useState(false);
@@ -395,6 +403,94 @@ export default function EnhancedPDFViewerScrollable() {
         break;
     }
   }, [zoom, selectedTool, isAnnotationMode]);
+
+  // Detect if input is from Apple Pencil/Stylus vs finger
+  const detectStylusInput = useCallback((event: PointerEvent | TouchEvent) => {
+    if ('pointerType' in event) {
+      // Pointer Events API - more reliable for stylus detection
+      const pointerEvent = event as PointerEvent;
+      return pointerEvent.pointerType === 'pen';
+    } else if ('touches' in event) {
+      // Fallback: Touch events - check for pressure (stylus typically has pressure)
+      const touchEvent = event as TouchEvent;
+      if (touchEvent.touches.length > 0) {
+        const touch = touchEvent.touches[0];
+        // Check for pressure attribute (Apple Pencil has pressure)
+        return (touch as any).force !== undefined && (touch as any).force > 0.5;
+      }
+    }
+    return false;
+  }, []);
+
+  // Handle touch/pointer down - detect stylus and prevent long-press context menu
+  const handlePointerDown = useCallback((event: PointerEvent | TouchEvent) => {
+    const isStylusInput = detectStylusInput(event);
+    setIsStylus(isStylusInput);
+    
+    touchStartTimeRef.current = Date.now();
+    
+    // Get the position
+    let x = 0, y = 0;
+    if ('touches' in event && event.touches.length > 0) {
+      x = event.touches[0].clientX;
+      y = event.touches[0].clientY;
+    } else if ('clientX' in event) {
+      x = (event as PointerEvent).clientX;
+      y = (event as PointerEvent).clientY;
+    }
+    
+    setLastTouchPoint({ x, y, time: Date.now() });
+    
+    // Clear any existing long-press timeout
+    if (longPressTimeoutRef.current) {
+      clearTimeout(longPressTimeoutRef.current);
+    }
+    
+    // Set long-press timeout only for stylus (to prevent iOS context menu interference)
+    if (isStylusInput) {
+      longPressTimeoutRef.current = setTimeout(() => {
+        // Long press detected on stylus - don't show context menu on pen
+        // This is handled by the annotation system
+      }, LONG_PRESS_THRESHOLD_MS);
+    }
+  }, [detectStylusInput, longPressTimeoutRef, touchStartTimeRef]);
+
+  // Handle touch/pointer up - clear timeouts
+  const handlePointerUp = useCallback(() => {
+    if (longPressTimeoutRef.current) {
+      clearTimeout(longPressTimeoutRef.current);
+      longPressTimeoutRef.current = null;
+    }
+    setIsStylus(false);
+  }, [longPressTimeoutRef]);
+
+  // Handle pointer move - detect velocity for input differentiation
+  const handlePointerMove = useCallback((event: PointerEvent | TouchEvent) => {
+    let x = 0, y = 0;
+    if ('touches' in event && event.touches.length > 0) {
+      x = event.touches[0].clientX;
+      y = event.touches[0].clientY;
+    } else if ('clientX' in event) {
+      x = (event as PointerEvent).clientX;
+      y = (event as PointerEvent).clientY;
+    }
+    
+    const deltaX = x - lastTouchPoint.x;
+    const deltaY = y - lastTouchPoint.y;
+    const deltaTime = Date.now() - lastTouchPoint.time;
+    
+    if (deltaTime > 0) {
+      const velocity = Math.sqrt(deltaX * deltaX + deltaY * deltaY) / deltaTime;
+      // Stylus typically has lower velocity for precise writing
+      // Finger scrolling typically has higher velocity
+      if (velocity > POINTER_VELOCITY_THRESHOLD && !isAnnotationMode) {
+        // High velocity = likely finger scroll - allow scrolling when annotations OFF
+        // This is handled by allowing default scroll behavior
+      }
+    }
+    
+    setLastTouchPoint({ x, y, time: Date.now() });
+  }, [lastTouchPoint, isAnnotationMode]);
 
   // Phase 6: Advanced storage functions
   const handleSaveSession = useCallback(async () => {
@@ -948,6 +1044,44 @@ export default function EnhancedPDFViewerScrollable() {
     };
   }, [totalPages, zoom]);
 
+  // Setup pointer events for iPad stylus/touch differentiation
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Prevent context menu on long press (iOS stylus)
+    const handleContextMenu = (e: Event) => {
+      if (isStylus) {
+        e.preventDefault();
+      }
+    };
+
+    // Allow touch move default behavior for scrolling
+    const handleTouchMove = (e: TouchEvent) => {
+      // Allow finger scrolling when annotations are OFF or when using 2+ touches (pan)
+      if (!isAnnotationMode || e.touches.length > 1) {
+        // Don't prevent default - allow native scroll/pan
+      } else if (isAnnotationMode && e.touches.length === 1 && isStylus) {
+        // Single stylus touch during annotation mode - allow annotation drawing
+        // Don't prevent default to let annotation canvas handle it
+      }
+    };
+
+    container.addEventListener('contextmenu', handleContextMenu);
+    container.addEventListener('pointerdown', handlePointerDown as any);
+    container.addEventListener('pointermove', handlePointerMove as any);
+    container.addEventListener('pointerup', handlePointerUp);
+    container.addEventListener('touchmove', handleTouchMove);
+
+    return () => {
+      container.removeEventListener('contextmenu', handleContextMenu);
+      container.removeEventListener('pointerdown', handlePointerDown as any);
+      container.removeEventListener('pointermove', handlePointerMove as any);
+      container.removeEventListener('pointerup', handlePointerUp);
+      container.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, [isAnnotationMode, isStylus, handlePointerDown, handlePointerUp, handlePointerMove]);
+
   // Handle zoom changes - update all visible pages and their pageInfo
   useEffect(() => {
     if (zoomDebounceRef.current) {
@@ -1242,7 +1376,9 @@ export default function EnhancedPDFViewerScrollable() {
         {/* PDF Viewer Container */}
         <div 
           ref={containerRef}
-          className="flex-1 overflow-auto bg-gray-200"
+          className={`flex-1 overflow-auto bg-gray-200 pdf-viewer-container ${
+            isAnnotationMode ? 'annotation-mode' : ''
+          } ${isStylus ? 'stylus-mode' : ''}`}
           style={{ height: 'calc(100vh - 80px)' }}
         >
           <div className="py-4">
@@ -1368,7 +1504,8 @@ export default function EnhancedPDFViewerScrollable() {
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
       </TouchGestureHandler>
 
-      {/* Mobile Annotation Toolbar - Phone only (not tablets/iPads) */}
+      {/* Mobile Annotation Toolbar - DISABLED FOR NOW */}
+      {/* Commented out bottom toolbar as it conflicts with top toolbar on tablets
       {mobileToolbarVisible && isMobile && !isTablet && (
         <MobileAnnotationToolbar
           selectedTool={selectedTool}
@@ -1397,6 +1534,7 @@ export default function EnhancedPDFViewerScrollable() {
           }}
         />
       )}
+      */}
 
       {/* Phase 7: 3-Tab Cambridge Reference Panel with PDF Viewer */}
       <CambridgeReferencePanel
