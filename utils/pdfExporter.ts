@@ -4,7 +4,8 @@
  */
 
 import { PDFDocument, PDFPage, rgb, StandardFonts, Color } from 'pdf-lib';
-import { Annotation, Point } from '../types/annotations';
+import { Annotation, Point, PageInfo } from '../types/annotations';
+import { coordinateSystem } from './coordinates';
 
 export interface ExportOptions {
   includeAnnotations?: boolean;
@@ -117,19 +118,108 @@ export class PDFAnnotationExporter {
   }
 
   /**
+   * Export annotations to PDF with proper coordinate conversion using PageInfo
+   */
+  async exportToPDFWithPageInfo(
+    annotationsWithPageInfo: { [pageNumber: number]: { annotations: Annotation[], pageInfo: PageInfo } },
+    options: ExportOptions = {
+      includeAnnotations: true,
+      includeMetadata: true,
+      quality: 'high',
+      format: 'pdf'
+    }
+  ): Promise<ExportResult> {
+    if (!this.pdfDoc) {
+      throw new Error('PDF document not initialized');
+    }
+
+    const startTime = performance.now();
+
+    try {
+      const exportDoc = await PDFDocument.create();
+      const pages = this.pdfDoc.getPages();
+
+      // Copy all pages from original PDF
+      const copiedPages = await exportDoc.copyPages(this.pdfDoc, pages.map((_, i) => i));
+      copiedPages.forEach(page => exportDoc.addPage(page));
+
+      let totalAnnotations = 0;
+
+      // Add annotations to each page (no conversion needed - already in PDF coordinates)
+      for (const [pageNum, { annotations }] of Object.entries(annotationsWithPageInfo)) {
+        const pageIndex = parseInt(pageNum) - 1; // Convert to 0-based index
+        if (pageIndex >= 0 && pageIndex < copiedPages.length && annotations.length > 0) {
+          const page = copiedPages[pageIndex];
+          
+          for (const annotation of annotations) {
+            // Annotations are already stored in PDF coordinates - use directly
+            await this.addAnnotationToPage(page, annotation);
+            totalAnnotations++;
+          }
+        }
+      }
+
+      // Add metadata if requested
+      if (options.includeMetadata) {
+        exportDoc.setTitle('Annotated PDF Document');
+        exportDoc.setSubject('PDF with embedded annotations');
+        exportDoc.setCreator('PDF Annotation System');
+        exportDoc.setProducer('Cambridge PDF Annotation Tool');
+        exportDoc.setCreationDate(new Date());
+        exportDoc.setModificationDate(new Date());
+      }
+
+      const pdfBytes = await exportDoc.save();
+      const exportTime = performance.now() - startTime;
+
+      return {
+        success: true,
+        data: pdfBytes,
+        filename: options.filename || 'annotated_document.pdf',
+        metadata: {
+          annotationCount: totalAnnotations,
+          fileSize: pdfBytes.length,
+          exportTime
+        }
+      };
+
+    } catch (error) {
+      return {
+        success: false,
+        filename: options.filename || 'export_failed.pdf',
+        error: `Export failed: ${error}`
+      };
+    }
+  }
+
+  /**
+   * Convert annotation coordinates from canvas space to PDF space
+   */
+  private convertAnnotationCoordinates(annotation: Annotation, pageInfo: PageInfo): Annotation {
+    // Convert all coordinate points from canvas to PDF space
+    const convertedCoordinates = annotation.coordinates.map(point => 
+      coordinateSystem.canvasToPdf(point, pageInfo)
+    );
+
+    return {
+      ...annotation,
+      coordinates: convertedCoordinates
+    };
+  }
+
+  /**
    * Add a single annotation to a PDF page
+   * Annotations are already in PDF coordinate space
    */
   private async addAnnotationToPage(page: PDFPage, annotation: Annotation): Promise<void> {
     try {
-      const pageSize = page.getSize();
       const color = this.parseColor(annotation.properties.color);
 
-      // Get first coordinate point for position
+      // Get first coordinate point for position (already in PDF space)
       const coords = annotation.coordinates[0] || { x: 0, y: 0 };
       
-      // Transform coordinates from canvas to PDF space
       const pdfX = coords.x;
-      const pdfY = pageSize.height - coords.y; // Flip Y coordinate
+      const pdfY = coords.y;
 
       switch (annotation.type) {
         case 'pen':
@@ -161,61 +251,86 @@ export class PDFAnnotationExporter {
   }
 
   /**
-   * Draw pen annotation (simplified version)
+   * Draw pen annotation with smooth strokes using all coordinate points
+   * Coordinates are already in PDF space, no Y-axis flip needed
    */
   private async drawPenAnnotation(page: PDFPage, annotation: Annotation, color: Color): Promise<void> {
-    // For pen annotations, we'll draw simple lines between coordinate points
-    if (annotation.coordinates.length < 2) return;
-
-    const pageSize = page.getSize();
+    // Use strokePoints if available (these are the full smooth path), otherwise use coordinates
+    const points = (annotation.properties.strokePoints as Point[]) || annotation.coordinates;
     
-    page.drawLine({
-      start: { 
-        x: annotation.coordinates[0].x, 
-        y: pageSize.height - annotation.coordinates[0].y 
-      },
-      end: { 
-        x: annotation.coordinates[annotation.coordinates.length - 1].x, 
-        y: pageSize.height - annotation.coordinates[annotation.coordinates.length - 1].y 
-      },
-      color: color,
-      thickness: annotation.properties.strokeWidth || 2
-    });
+    if (points.length < 2) return;
+
+    const thickness = annotation.properties.strokeWidth || 2;
+    
+    // Draw smooth curves between points using quadratic bezier curves
+    // Coordinates are already in PDF space with proper origin
+    for (let i = 0; i < points.length - 1; i++) {
+      const current = points[i];
+      const next = points[i + 1];
+      
+      page.drawLine({
+        start: { 
+          x: current.x, 
+          y: current.y 
+        },
+        end: { 
+          x: next.x, 
+          y: next.y 
+        },
+        color: color,
+        thickness: thickness
+      });
+    }
   }
 
   /**
-   * Draw highlighter annotation
+   * Draw highlighter annotation using all coordinate points for accurate coverage
+   * Coordinates are already in PDF space
    */
   private async drawHighlighterAnnotation(page: PDFPage, annotation: Annotation, color: Color): Promise<void> {
-    if (annotation.coordinates.length < 2) return;
+    // Use strokePoints if available, otherwise use coordinates
+    const points = (annotation.properties.strokePoints as Point[]) || annotation.coordinates;
+    
+    if (points.length < 2) return;
 
-    const pageSize = page.getSize();
-    const start = annotation.coordinates[0];
-    const end = annotation.coordinates[annotation.coordinates.length - 1];
-
-    page.drawRectangle({
-      x: Math.min(start.x, end.x),
-      y: pageSize.height - Math.max(start.y, end.y),
-      width: Math.abs(end.x - start.x) || 100,
-      height: Math.abs(end.y - start.y) || 20,
-      color: color,
-      opacity: annotation.properties.opacity || 0.3
-    });
+    const thickness = annotation.properties.strokeWidth || 15; // Highlighters are thicker
+    const opacity = annotation.properties.opacity || 0.3;
+    
+    // Draw thick lines between all points to create continuous highlight effect
+    // Coordinates are already in PDF space
+    for (let i = 0; i < points.length - 1; i++) {
+      const current = points[i];
+      const next = points[i + 1];
+      
+      page.drawLine({
+        start: { 
+          x: current.x, 
+          y: current.y 
+        },
+        end: { 
+          x: next.x, 
+          y: next.y 
+        },
+        color: color,
+        thickness: thickness,
+        opacity: opacity
+      });
+    }
   }
 
   /**
    * Draw rectangle annotation
+   * Coordinates are already in PDF space
    */
   private async drawRectangleAnnotation(page: PDFPage, annotation: Annotation, color: Color): Promise<void> {
     if (annotation.coordinates.length < 2) return;
 
-    const pageSize = page.getSize();
     const start = annotation.coordinates[0];
     const end = annotation.coordinates[annotation.coordinates.length - 1];
 
     page.drawRectangle({
       x: Math.min(start.x, end.x),
-      y: pageSize.height - Math.max(start.y, end.y),
+      y: Math.min(start.y, end.y),
       width: Math.abs(end.x - start.x) || 100,
       height: Math.abs(end.y - start.y) || 50,
       borderColor: color,
@@ -225,18 +340,18 @@ export class PDFAnnotationExporter {
 
   /**
    * Draw circle annotation
+   * Coordinates are already in PDF space
    */
   private async drawCircleAnnotation(page: PDFPage, annotation: Annotation, color: Color): Promise<void> {
     if (annotation.coordinates.length < 2) return;
 
-    const pageSize = page.getSize();
     const start = annotation.coordinates[0];
     const end = annotation.coordinates[annotation.coordinates.length - 1];
     const radius = Math.min(Math.abs(end.x - start.x), Math.abs(end.y - start.y)) / 2 || 25;
 
     page.drawCircle({
       x: start.x,
-      y: pageSize.height - start.y,
+      y: start.y,
       size: radius,
       borderColor: color,
       borderWidth: annotation.properties.strokeWidth || 2

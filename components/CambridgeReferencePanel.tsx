@@ -1,10 +1,16 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { ZoomIn, ZoomOut, RotateCcw, ChevronLeft, X } from 'lucide-react';
 
 /**
- * Cambridge-specific reference panel system
- * Auto-detects related files (Marking Schemes, Inserts, Source Forms)
- * Phase 6: Reference panel integration with cross-document linking
+ * Cambridge Reference Panel - Responsive sidebar for viewing related exam documents
+ * Features: 3-tab system (MS/IN/QP), auto-detection of related files, built-in PDF viewer with zoom
+ * Responsive: 500px on desktop, proportionate on tablet, full width on mobile
+ * Architecture: Modular components with separated concerns
  */
+
+// ============================================
+// TYPE DEFINITIONS
+// ============================================
 
 interface CambridgeFile {
   id: string;
@@ -30,10 +36,47 @@ interface ReferenceGroup {
 interface CambridgeReferencePanelProps {
   currentPaper?: string;
   onFileSelect: (file: CambridgeFile) => void;
-  onAnnotationLink?: (sourceFile: string, targetFile: string, annotation: any) => void;
   isVisible: boolean;
   onToggle: () => void;
+  onClose?: () => void;
+  linkedMarkingScheme?: string | null;
+  linkedInsertPaper?: string | null;
+  onMarkingSchemeChange?: (scheme: string | null) => void;
+  onInsertPaperChange?: (paper: string | null) => void;
 }
+
+interface TabButtonProps {
+  type: 'ms' | 'in' | 'qp';
+  isActive: boolean;
+  onClick: () => void;
+}
+
+interface PanelHeaderProps {
+  currentParsed: Partial<CambridgeFile> | null;
+  onClose: () => void;
+}
+
+interface PDFViewerProps {
+  file: CambridgeFile;
+  zoomLevel: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onZoomReset: () => void;
+}
+
+interface TabContentProps {
+  loading: boolean;
+  currentFile: CambridgeFile | undefined;
+  activeTab: string;
+  zoomLevel: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onZoomReset: () => void;
+}
+
+// ============================================
+// CONSTANTS
+// ============================================
 
 const FILE_TYPE_CONFIG = {
   qp: { name: 'Question Paper', icon: '❓', color: '#3B82F6', description: 'Exam questions' },
@@ -42,600 +85,752 @@ const FILE_TYPE_CONFIG = {
   sf: { name: 'Source Booklet', icon: '📋', color: '#F59E0B', description: 'Source materials' }
 };
 
+const TAB_TYPES: Array<'ms' | 'in' | 'qp'> = ['ms', 'in', 'qp'];
+
+// ============================================
+// SUB-COMPONENTS
+// ============================================
+
+/**
+ * Panel Header - Displays title, paper info, and close button
+ */
+const PanelHeader: React.FC<PanelHeaderProps> = ({ currentParsed, onClose }) => (
+  <div className="panel-header">
+    <div className="header-content">
+      <h2>Related Documents</h2>
+      {currentParsed && (
+        <p className="paper-info">
+          Subject {currentParsed.subject} • {currentParsed.series?.toUpperCase()} • Paper {currentParsed.paper}
+        </p>
+      )}
+    </div>
+    <button className="close-btn" onClick={onClose} title="Close panel">
+      <X size={18} />
+    </button>
+  </div>
+);
+
+/**
+ * Tab Button - Individual tab for MS/IN/QP selection
+ */
+const TabButton: React.FC<TabButtonProps> = ({ type, isActive, onClick }) => {
+  const config = FILE_TYPE_CONFIG[type];
+  const tabLabel = type.toUpperCase();
+  
+  return (
+    <button
+      className={`tab ${isActive ? 'active' : ''}`}
+      onClick={onClick}
+      title={config.name}
+      aria-label={`Switch to ${config.name}`}
+      aria-current={isActive ? 'page' : undefined}
+    >
+      <span className="tab-icon">{config.icon}</span>
+      <span className="tab-label">{tabLabel}</span>
+    </button>
+  );
+};
+
+/**
+ * Tab Navigation - Container for all tab buttons
+ */
+const TabNavigation: React.FC<{
+  activeTab: 'ms' | 'in' | 'qp';
+  onTabChange: (tab: 'ms' | 'in' | 'qp') => void;
+}> = ({ activeTab, onTabChange }) => (
+  <div className="panel-tabs">
+    {TAB_TYPES.map(tabType => (
+      <TabButton
+        key={tabType}
+        type={tabType}
+        isActive={activeTab === tabType}
+        onClick={() => onTabChange(tabType)}
+      />
+    ))}
+  </div>
+);
+
+/**
+ * Zoom Controls - Zoom in/out/reset buttons with level display
+ */
+const ZoomControls: React.FC<{
+  zoomLevel: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onZoomReset: () => void;
+}> = ({ zoomLevel, onZoomIn, onZoomOut, onZoomReset }) => (
+  <div className="zoom-controls">
+    <button 
+      onClick={onZoomOut} 
+      disabled={zoomLevel <= 50} 
+      title="Zoom Out"
+      aria-label="Zoom out"
+    >
+      <ZoomOut size={16} />
+    </button>
+    <span className="zoom-level">{zoomLevel}%</span>
+    <button 
+      onClick={onZoomIn} 
+      disabled={zoomLevel >= 200} 
+      title="Zoom In"
+      aria-label="Zoom in"
+    >
+      <ZoomIn size={16} />
+    </button>
+    <button 
+      onClick={onZoomReset} 
+      title="Reset Zoom"
+      aria-label="Reset zoom to 100%"
+    >
+      <RotateCcw size={16} />
+    </button>
+  </div>
+);
+
+/**
+ * PDF Viewer - Iframe-based PDF rendering with zoom controls
+ */
+const PDFViewerComponent: React.FC<PDFViewerProps> = ({
+  file,
+  zoomLevel,
+  onZoomIn,
+  onZoomOut,
+  onZoomReset,
+}) => (
+  <div className="pdf-viewer-container">
+    <ZoomControls
+      zoomLevel={zoomLevel}
+      onZoomIn={onZoomIn}
+      onZoomOut={onZoomOut}
+      onZoomReset={onZoomReset}
+    />
+    <div className="pdf-frame">
+      <iframe
+        src={`${file.url}#zoom=${zoomLevel}&toolbar=0&navpanes=0&scrollbar=1`}
+        className="pdf-iframe"
+        title={file.typeName}
+        aria-label={`PDF viewer for ${file.typeName}`}
+      />
+    </div>
+  </div>
+);
+
+/**
+ * Tab Content - Displays loading state, PDF viewer, or empty state
+ */
+const TabContent: React.FC<TabContentProps> = ({
+  loading,
+  currentFile,
+  activeTab,
+  zoomLevel,
+  onZoomIn,
+  onZoomOut,
+  onZoomReset,
+}) => {
+  if (loading) {
+    return (
+      <div className="loading-state">
+        <p>Loading documents...</p>
+      </div>
+    );
+  }
+
+  if (!currentFile) {
+    return (
+      <div className="no-document">
+        <p>No {activeTab.toUpperCase()} document available</p>
+        <p className="help-text">Or file not found at: /papers/..._{activeTab}_*.pdf</p>
+        <p className="help-text" style={{marginTop: '8px', fontSize: '11px'}}>
+          Try switching to another tab or open a different paper
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <PDFViewerComponent
+      file={currentFile}
+      zoomLevel={zoomLevel}
+      onZoomIn={onZoomIn}
+      onZoomOut={onZoomOut}
+      onZoomReset={onZoomReset}
+    />
+  );
+};
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
+/**
+ * Parse Cambridge exam paper filename into components
+ * Regex pattern: SUBJECT_SERIES_TYPE_PAPER.pdf (e.g., 9706_s23_qp_32.pdf)
+ */
+const parseCambridgeFilename = (filename: string): Partial<CambridgeFile> | null => {
+  const match = filename.match(/^(\d{4})_([smw]\d{2})_(qp|ms|in|sf)_(\w+)\.pdf$/i);
+  
+  if (!match) return null;
+  
+  const [, subject, series, type, paper] = match;
+  const fileType = type.toLowerCase() as 'qp' | 'ms' | 'in' | 'sf';
+  
+  return {
+    subject,
+    series,
+    paper,
+    type: fileType,
+    typeName: FILE_TYPE_CONFIG[fileType]?.name || type.toUpperCase()
+  };
+};
+
+/**
+ * Generate related files (MS, IN, QP) from a current paper
+ */
+const generateRelatedFiles = (currentPaper: string, parsed: Partial<CambridgeFile>): CambridgeFile[] => {
+  return [
+    {
+      id: 'ms',
+      filename: `${parsed.subject}_${parsed.series}_ms_${parsed.paper}.pdf`,
+      subject: parsed.subject!,
+      series: parsed.series!,
+      paper: parsed.paper!,
+      type: 'ms',
+      typeName: 'Marking Scheme',
+      url: `/papers/${parsed.subject}_${parsed.series}_ms_${parsed.paper}.pdf`
+    },
+    {
+      id: 'in',
+      filename: `${parsed.subject}_${parsed.series}_in_${parsed.paper}.pdf`,
+      subject: parsed.subject!,
+      series: parsed.series!,
+      paper: parsed.paper!,
+      type: 'in',
+      typeName: 'Insert',
+      url: `/papers/${parsed.subject}_${parsed.series}_in_${parsed.paper}.pdf`
+    },
+    {
+      id: 'qp',
+      filename: currentPaper,
+      subject: parsed.subject!,
+      series: parsed.series!,
+      paper: parsed.paper!,
+      type: 'qp',
+      typeName: 'Question Paper',
+      url: `/papers/${currentPaper}`
+    }
+  ];
+};
+
+// ============================================
+// MAIN COMPONENT
+// ============================================
+
 export const CambridgeReferencePanel: React.FC<CambridgeReferencePanelProps> = ({
   currentPaper,
   onFileSelect,
-  onAnnotationLink,
   isVisible,
-  onToggle
+  onToggle,
+  onClose,
+  linkedMarkingScheme,
+  linkedInsertPaper,
+  onMarkingSchemeChange,
+  onInsertPaperChange
 }) => {
+  // ============================================
+  // STATE
+  // ============================================
+
   const [availableFiles, setAvailableFiles] = useState<CambridgeFile[]>([]);
-  const [selectedGroup, setSelectedGroup] = useState<ReferenceGroup | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<'ms' | 'in' | 'qp'>('ms');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'related' | 'search' | 'bookmarks'>('related');
-  const [bookmarkedFiles, setBookmarkedFiles] = useState<string[]>([]);
+  const [zoomLevel, setZoomLevel] = useState(100);
+  const [currentParsed, setCurrentParsed] = useState<Partial<CambridgeFile> | null>(null);
 
-  // Parse Cambridge filename
-  const parseCambridgeFilename = (filename: string): Partial<CambridgeFile> | null => {
-    const match = filename.match(/^(\d{4})_([smw]\d{2})_(qp|ms|in|sf)_(\w+)\.pdf$/i);
-    
-    if (!match) return null;
-    
-    const [, subject, series, type, paper] = match;
-    const fileType = type.toLowerCase() as 'qp' | 'ms' | 'in' | 'sf';
-    
-    return {
-      subject,
-      series,
-      paper,
-      type: fileType,
-      typeName: FILE_TYPE_CONFIG[fileType]?.name || type.toUpperCase()
-    };
-  };
+  // ============================================
+  // EFFECTS
+  // ============================================
 
-  // Load available Cambridge files
+  /**
+   * Load related files when current paper changes
+   * Generates MS, IN, QP variants from the current paper filename
+   */
   useEffect(() => {
-    const loadAvailableFiles = async () => {
+    const loadRelatedFiles = async () => {
+      console.log('[CambridgeReferencePanel] currentPaper:', currentPaper);
+      
+      if (!currentPaper) {
+        setAvailableFiles([]);
+        setCurrentParsed(null);
+        return;
+      }
+
       setLoading(true);
       
       try {
-        // In a real implementation, this would fetch from your file system or API
-        // For now, we'll simulate with common Cambridge files
-        const simulatedFiles: CambridgeFile[] = [
-          {
-            id: '1',
-            filename: '9706_s23_qp_32.pdf',
-            subject: '9706',
-            series: 's23',
-            paper: '32',
-            type: 'qp',
-            typeName: 'Question Paper',
-            url: '/papers/9706_s23_qp_32.pdf'
-          },
-          {
-            id: '2',
-            filename: '9706_s23_ms_32.pdf',
-            subject: '9706',
-            series: 's23',
-            paper: '32',
-            type: 'ms',
-            typeName: 'Marking Scheme',
-            url: '/papers/9706_s23_ms_32.pdf'
-          },
-          {
-            id: '3',
-            filename: '9706_s23_in_32.pdf',
-            subject: '9706',
-            series: 's23',
-            paper: '32',
-            type: 'in',
-            typeName: 'Insert',
-            url: '/papers/9706_s23_in_32.pdf'
-          }
-        ];
+        const parsed = parseCambridgeFilename(currentPaper);
+        console.log('[CambridgeReferencePanel] Parsed filename:', parsed);
         
-        setAvailableFiles(simulatedFiles);
-        
-        // Auto-select related files if current paper is available
-        if (currentPaper) {
-          const currentParsed = parseCambridgeFilename(currentPaper);
-          if (currentParsed) {
-            const relatedFiles = simulatedFiles.filter(file => 
-              file.subject === currentParsed.subject &&
-              file.series === currentParsed.series &&
-              file.paper === currentParsed.paper
-            );
-            
-            if (relatedFiles.length > 0) {
-              setSelectedGroup({
-                subject: currentParsed.subject!,
-                series: currentParsed.series!,
-                paper: currentParsed.paper!,
-                files: relatedFiles,
-                current: currentPaper
-              });
-            }
-          }
+        if (!parsed) {
+          console.log('[CambridgeReferencePanel] Failed to parse filename');
+          setAvailableFiles([]);
+          setCurrentParsed(null);
+          return;
         }
+
+        setCurrentParsed(parsed);
+        const relatedFiles = generateRelatedFiles(currentPaper, parsed);
+        console.log('[CambridgeReferencePanel] Generated related files:', relatedFiles);
+        setAvailableFiles(relatedFiles);
         
       } catch (error) {
-        console.error('Failed to load Cambridge files:', error);
+        console.error('Failed to load related files:', error);
+        setAvailableFiles([]);
+        setCurrentParsed(null);
       } finally {
         setLoading(false);
       }
     };
 
-    loadAvailableFiles();
+    loadRelatedFiles();
   }, [currentPaper]);
 
-  // Group files by subject, series, and paper
-  const groupedFiles = useMemo(() => {
-    const groups: { [key: string]: ReferenceGroup } = {};
-    
-    availableFiles.forEach(file => {
-      const key = `${file.subject}_${file.series}_${file.paper}`;
-      
-      if (!groups[key]) {
-        groups[key] = {
-          subject: file.subject,
-          series: file.series,
-          paper: file.paper,
-          files: []
-        };
-      }
-      
-      groups[key].files.push(file);
-    });
-    
-    return Object.values(groups);
-  }, [availableFiles]);
+  // ============================================
+  // MEMOIZED SELECTORS
+  // ============================================
 
-  // Filter files based on search
-  const filteredFiles = useMemo(() => {
-    if (!searchQuery) return availableFiles;
-    
-    return availableFiles.filter(file =>
-      file.filename.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      file.typeName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      FILE_TYPE_CONFIG[file.type].description.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [availableFiles, searchQuery]);
+  /**
+   * Get current tab's file - memoized to prevent unnecessary re-renders
+   */
+  const currentTabFile = useMemo(() => {
+    return availableFiles.find(file => file.type === activeTab);
+  }, [availableFiles, activeTab]);
 
-  const handleFileSelect = (file: CambridgeFile) => {
-    onFileSelect(file);
-  };
+  // ============================================
+  // HANDLERS
+  // ============================================
 
-  const handleBookmark = (fileId: string) => {
-    setBookmarkedFiles(prev => 
-      prev.includes(fileId) 
-        ? prev.filter(id => id !== fileId)
-        : [...prev, fileId]
-    );
-  };
+  /**
+   * Zoom level management callbacks
+   */
+  const handleZoomIn = useCallback(() => {
+    setZoomLevel(prev => Math.min(prev + 10, 200));
+  }, []);
 
-  const RelatedFilesTab = () => (
-    <div className="reference-content">
-      {selectedGroup ? (
-        <div className="file-group">
-          <div className="group-header">
-            <h3>Related Files</h3>
-            <div className="group-info">
-              <span className="subject-badge">Subject {selectedGroup.subject}</span>
-              <span className="series-badge">{selectedGroup.series.toUpperCase()}</span>
-              <span className="paper-badge">Paper {selectedGroup.paper}</span>
-            </div>
-          </div>
-          
-          <div className="file-list">
-            {selectedGroup.files.map(file => (
-              <div
-                key={file.id}
-                className={`file-item ${file.filename === currentPaper ? 'current' : ''}`}
-                onClick={() => handleFileSelect(file)}
-              >
-                <div className="file-icon" style={{ color: FILE_TYPE_CONFIG[file.type].color }}>
-                  {FILE_TYPE_CONFIG[file.type].icon}
-                </div>
-                <div className="file-details">
-                  <div className="file-name">{file.filename}</div>
-                  <div className="file-description">
-                    {FILE_TYPE_CONFIG[file.type].description}
-                  </div>
-                </div>
-                <div className="file-actions">
-                  <button
-                    className={`bookmark-btn ${bookmarkedFiles.includes(file.id) ? 'bookmarked' : ''}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleBookmark(file.id);
-                    }}
-                  >
-                    {bookmarkedFiles.includes(file.id) ? '⭐' : '☆'}
-                  </button>
-                  {file.filename === currentPaper && (
-                    <span className="current-indicator">Current</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div className="no-selection">
-          <p>No related files found for current paper</p>
-          <button onClick={() => setActiveTab('search')}>Search Files</button>
-        </div>
-      )}
-    </div>
-  );
+  const handleZoomOut = useCallback(() => {
+    setZoomLevel(prev => Math.max(prev - 10, 50));
+  }, []);
 
-  const SearchTab = () => (
-    <div className="reference-content">
-      <div className="search-section">
-        <input
-          type="text"
-          placeholder="Search Cambridge files..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="search-input"
-        />
-      </div>
-      
-      <div className="file-list">
-        {filteredFiles.map(file => (
-          <div
-            key={file.id}
-            className="file-item"
-            onClick={() => handleFileSelect(file)}
-          >
-            <div className="file-icon" style={{ color: FILE_TYPE_CONFIG[file.type].color }}>
-              {FILE_TYPE_CONFIG[file.type].icon}
-            </div>
-            <div className="file-details">
-              <div className="file-name">{file.filename}</div>
-              <div className="file-description">
-                {FILE_TYPE_CONFIG[file.type].description}
-              </div>
-            </div>
-            <div className="file-actions">
-              <button
-                className={`bookmark-btn ${bookmarkedFiles.includes(file.id) ? 'bookmarked' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleBookmark(file.id);
-                }}
-              >
-                {bookmarkedFiles.includes(file.id) ? '⭐' : '☆'}
-              </button>
-            </div>
-          </div>
-        ))}
-        
-        {filteredFiles.length === 0 && searchQuery && (
-          <div className="no-results">
-            <p>No files found matching "{searchQuery}"</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  const handleZoomReset = useCallback(() => {
+    setZoomLevel(100);
+  }, []);
 
-  const BookmarksTab = () => {
-    const bookmarked = availableFiles.filter(file => bookmarkedFiles.includes(file.id));
-    
-    return (
-      <div className="reference-content">
-        {bookmarked.length > 0 ? (
-          <div className="file-list">
-            {bookmarked.map(file => (
-              <div
-                key={file.id}
-                className="file-item"
-                onClick={() => handleFileSelect(file)}
-              >
-                <div className="file-icon" style={{ color: FILE_TYPE_CONFIG[file.type].color }}>
-                  {FILE_TYPE_CONFIG[file.type].icon}
-                </div>
-                <div className="file-details">
-                  <div className="file-name">{file.filename}</div>
-                  <div className="file-description">
-                    {FILE_TYPE_CONFIG[file.type].description}
-                  </div>
-                </div>
-                <div className="file-actions">
-                  <button
-                    className="bookmark-btn bookmarked"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleBookmark(file.id);
-                    }}
-                  >
-                    ⭐
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="no-bookmarks">
-            <p>No bookmarked files</p>
-            <p>Bookmark files by clicking the star icon</p>
-          </div>
-        )}
-      </div>
-    );
-  };
+  /**
+   * Panel toggle - provides true toggle behavior for ChevronLeft button
+   */
+  const handleToggle = useCallback(() => {
+    onToggle();
+  }, [onToggle]);
+
+  /**
+   * Panel close - X button handler with fallback to toggle if no onClose provided
+   */
+  const handleClose = useCallback(() => {
+    if (onClose) {
+      onClose();
+    } else {
+      onToggle();
+    }
+  }, [onClose, onToggle]);
+
+  /**
+   * Tab change - switch between MS/IN/QP tabs
+   */
+  const handleTabChange = useCallback((tab: 'ms' | 'in' | 'qp') => {
+    setActiveTab(tab);
+  }, []);
+
+  // ============================================
+  // RENDER
+  // ============================================
 
   return (
-    <div className={`cambridge-reference-panel ${isVisible ? 'visible' : 'hidden'}`}>
-      <div className="panel-header">
-        <h2>Reference Panel</h2>
-        <button className="close-btn" onClick={onToggle}>×</button>
-      </div>
-      
-      <div className="panel-tabs">
-        <button
-          className={`tab ${activeTab === 'related' ? 'active' : ''}`}
-          onClick={() => setActiveTab('related')}
-        >
-          Related Files
-        </button>
-        <button
-          className={`tab ${activeTab === 'search' ? 'active' : ''}`}
-          onClick={() => setActiveTab('search')}
-        >
-          Search
-        </button>
-        <button
-          className={`tab ${activeTab === 'bookmarks' ? 'active' : ''}`}
-          onClick={() => setActiveTab('bookmarks')}
-        >
-          Bookmarks ({bookmarkedFiles.length})
-        </button>
-      </div>
-      
-      {loading ? (
-        <div className="loading-state">
-          <p>Loading Cambridge files...</p>
+    <>
+      {/* Toggle Button - Opens/closes the reference panel */}
+      <button
+        onClick={handleToggle}
+        className={`fixed top-36 z-30 bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-l transition-all duration-300 ${
+          isVisible ? 'right-[500px] lg:right-[500px] md:right-[40vw]' : 'right-0'
+        }`}
+        title={isVisible ? 'Close reference panel' : 'Open reference panel'}
+        aria-label={isVisible ? 'Close reference panel' : 'Open reference panel'}
+        aria-expanded={isVisible}
+      >
+        <ChevronLeft 
+          size={20} 
+          style={{ 
+            transform: isVisible ? 'rotateY(180deg)' : 'none',
+            transition: 'transform 0.2s ease'
+          }} 
+        />
+      </button>
+
+      {/* Reference Panel Container */}
+      <div className={`cambridge-reference-panel ${isVisible ? 'visible' : 'hidden'}`}>
+        {/* Header Section - Title and close button */}
+        <PanelHeader 
+          currentParsed={currentParsed} 
+          onClose={handleClose} 
+        />
+        
+        {/* Tab Navigation - MS / IN / QP tabs */}
+        <TabNavigation 
+          activeTab={activeTab} 
+          onTabChange={handleTabChange} 
+        />
+        
+        {/* Content Area - PDF viewer or empty state */}
+        <div className="panel-content">
+          <TabContent
+            loading={loading}
+            currentFile={currentTabFile}
+            activeTab={activeTab}
+            zoomLevel={zoomLevel}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            onZoomReset={handleZoomReset}
+          />
         </div>
-      ) : (
-        <div className="tab-content">
-          {activeTab === 'related' && <RelatedFilesTab />}
-          {activeTab === 'search' && <SearchTab />}
-          {activeTab === 'bookmarks' && <BookmarksTab />}
-        </div>
-      )}
 
-      <style jsx>{`
-        .cambridge-reference-panel {
-          position: fixed;
-          top: 0;
-          right: 0;
-          width: 400px;
-          height: 100vh;
-          background: white;
-          border-left: 1px solid #E5E7EB;
-          box-shadow: -4px 0 20px rgba(0, 0, 0, 0.1);
-          z-index: 1000;
-          transform: translateX(100%);
-          transition: transform 0.3s ease;
-          overflow: hidden;
-          display: flex;
-          flex-direction: column;
-        }
-
-        .cambridge-reference-panel.visible {
-          transform: translateX(0);
-        }
-
-        .panel-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 16px;
-          border-bottom: 1px solid #E5E7EB;
-          background: #F9FAFB;
-        }
-
-        .panel-header h2 {
-          margin: 0;
-          font-size: 18px;
-          color: #1F2937;
-        }
-
-        .close-btn {
-          background: none;
-          border: none;
-          font-size: 24px;
-          cursor: pointer;
-          color: #6B7280;
-          padding: 4px;
-        }
-
-        .close-btn:hover {
-          color: #1F2937;
-        }
-
-        .panel-tabs {
-          display: flex;
-          border-bottom: 1px solid #E5E7EB;
-          background: #F9FAFB;
-        }
-
-        .tab {
-          flex: 1;
-          padding: 12px 16px;
-          border: none;
-          background: none;
-          cursor: pointer;
-          font-size: 14px;
-          color: #6B7280;
-          border-bottom: 2px solid transparent;
-        }
-
-        .tab.active {
-          color: #3B82F6;
-          border-bottom-color: #3B82F6;
-          background: white;
-        }
-
-        .tab:hover {
-          background: rgba(59, 130, 246, 0.05);
-        }
-
-        .tab-content {
-          flex: 1;
-          overflow-y: auto;
-        }
-
-        .reference-content {
-          padding: 16px;
-        }
-
-        .group-header {
-          margin-bottom: 16px;
-        }
-
-        .group-header h3 {
-          margin: 0 0 8px 0;
-          font-size: 16px;
-          color: #1F2937;
-        }
-
-        .group-info {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-
-        .subject-badge,
-        .series-badge,
-        .paper-badge {
-          padding: 4px 8px;
-          border-radius: 4px;
-          font-size: 12px;
-          font-weight: 500;
-        }
-
-        .subject-badge {
-          background: #DBEAFE;
-          color: #1E40AF;
-        }
-
-        .series-badge {
-          background: #D1FAE5;
-          color: #065F46;
-        }
-
-        .paper-badge {
-          background: #FEF3C7;
-          color: #92400E;
-        }
-
-        .file-list {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-
-        .file-item {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 12px;
-          border: 1px solid #E5E7EB;
-          border-radius: 8px;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .file-item:hover {
-          border-color: #D1D5DB;
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-        }
-
-        .file-item.current {
-          border-color: #3B82F6;
-          background: #EFF6FF;
-        }
-
-        .file-icon {
-          font-size: 24px;
-          min-width: 32px;
-          text-align: center;
-        }
-
-        .file-details {
-          flex: 1;
-          min-width: 0;
-        }
-
-        .file-name {
-          font-weight: 500;
-          color: #1F2937;
-          margin-bottom: 2px;
-        }
-
-        .file-description {
-          font-size: 12px;
-          color: #6B7280;
-        }
-
-        .file-actions {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .bookmark-btn {
-          background: none;
-          border: none;
-          cursor: pointer;
-          font-size: 16px;
-          color: #D1D5DB;
-          padding: 4px;
-        }
-
-        .bookmark-btn:hover,
-        .bookmark-btn.bookmarked {
-          color: #FCD34D;
-        }
-
-        .current-indicator {
-          font-size: 11px;
-          background: #3B82F6;
-          color: white;
-          padding: 2px 6px;
-          border-radius: 4px;
-          font-weight: 500;
-        }
-
-        .search-section {
-          margin-bottom: 16px;
-        }
-
-        .search-input {
-          width: 100%;
-          padding: 8px 12px;
-          border: 1px solid #D1D5DB;
-          border-radius: 6px;
-          font-size: 14px;
-        }
-
-        .search-input:focus {
-          outline: none;
-          border-color: #3B82F6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-        }
-
-        .no-selection,
-        .no-results,
-        .no-bookmarks,
-        .loading-state {
-          text-align: center;
-          padding: 40px 20px;
-          color: #6B7280;
-        }
-
-        .no-selection button {
-          margin-top: 16px;
-          padding: 8px 16px;
-          background: #3B82F6;
-          color: white;
-          border: none;
-          border-radius: 6px;
-          cursor: pointer;
-        }
-
-        @media (max-width: 768px) {
+        {/* Styling - Scoped CSS for the reference panel */}
+        <style jsx>{`
           .cambridge-reference-panel {
-            width: 100%;
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 500px;
+            height: 100vh;
+            background: white;
+            border-left: 1px solid #E5E7EB;
+            box-shadow: -4px 0 20px rgba(0, 0, 0, 0.1);
+            z-index: 25;
             transform: translateX(100%);
+            transition: transform 0.3s ease;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
           }
-        }
-      `}</style>
-    </div>
+
+          .cambridge-reference-panel.visible {
+            transform: translateX(0);
+          }
+
+          /* ---- Panel Header ---- */
+          .panel-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            padding: 16px;
+            border-bottom: 1px solid #E5E7EB;
+            background: #F9FAFB;
+            flex-shrink: 0;
+          }
+
+          .header-content {
+            flex: 1;
+          }
+
+          .panel-header h2 {
+            margin: 0 0 4px 0;
+            font-size: 18px;
+            color: #1F2937;
+            font-weight: 600;
+          }
+
+          .paper-info {
+            margin: 0;
+            font-size: 12px;
+            color: #6B7280;
+            font-weight: 400;
+          }
+
+          .close-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #6B7280;
+            padding: 6px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+          }
+
+          .close-btn:hover {
+            color: #1F2937;
+            background: #E5E7EB;
+          }
+
+          /* ---- Tab Navigation ---- */
+          .panel-tabs {
+            display: flex;
+            border-bottom: 1px solid #E5E7EB;
+            background: #F9FAFB;
+            flex-shrink: 0;
+          }
+
+          .tab {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 12px 8px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            color: #6B7280;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s ease;
+            font-family: inherit;
+          }
+
+          .tab.active {
+            color: #3B82F6;
+            border-bottom-color: #3B82F6;
+            background: white;
+          }
+
+          .tab:hover:not(.active) {
+            background: rgba(59, 130, 246, 0.05);
+            color: #374151;
+          }
+
+          .tab-icon {
+            font-size: 18px;
+            line-height: 1;
+          }
+
+          .tab-label {
+            font-size: 12px;
+            font-weight: 600;
+          }
+
+          /* ---- Panel Content ---- */
+          .panel-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+          }
+
+          /* ---- PDF Viewer Container ---- */
+          .pdf-viewer-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            height: 100%;
+            min-height: 0;
+          }
+
+          /* ---- Zoom Controls ---- */
+          .zoom-controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px;
+            border-bottom: 1px solid #E5E7EB;
+            background: #F9FAFB;
+            flex-shrink: 0;
+          }
+
+          .zoom-controls button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border: 1px solid #D1D5DB;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: #374151;
+            font-family: inherit;
+            padding: 0;
+          }
+
+          .zoom-controls button:hover:not(:disabled) {
+            background: #F3F4F6;
+            border-color: #9CA3AF;
+            color: #1F2937;
+          }
+
+          .zoom-controls button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+          }
+
+          .zoom-level {
+            font-size: 14px;
+            font-weight: 500;
+            color: #374151;
+            min-width: 50px;
+            text-align: center;
+          }
+
+          /* ---- PDF Frame ---- */
+          .pdf-frame {
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+            background: #f5f5f5;
+            min-height: 0;
+          }
+
+          .pdf-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+            background: white;
+            min-height: 100%;
+          }
+
+          /* ---- Empty States ---- */
+          .loading-state,
+          .no-document {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 40px 20px;
+            color: #6B7280;
+          }
+
+          .loading-state p,
+          .no-document p {
+            margin: 0;
+            font-size: 14px;
+            line-height: 1.5;
+          }
+
+          .help-text {
+            font-size: 13px;
+            margin-top: 8px;
+            color: #9CA3AF;
+          }
+
+          /* ---- Responsive Design ---- */
+          /* Laptop with drawing pad: 500px (default) */
+          /* Tablet: 40-50% width */
+          @media (max-width: 1024px) {
+            .cambridge-reference-panel {
+              width: 50vw;
+              max-width: 500px;
+            }
+
+            .tab-label {
+              display: none;
+            }
+          }
+
+          /* iPad Landscape: 45% width */
+          @media (max-width: 1024px) and (orientation: landscape) {
+            .cambridge-reference-panel {
+              width: 45vw;
+            }
+          }
+
+          /* iPad/Tablet: 50% width */
+          @media (max-width: 768px) {
+            .cambridge-reference-panel {
+              width: 50vw;
+              max-width: 100%;
+            }
+
+            .tab-label {
+              display: none;
+            }
+
+            .zoom-controls button {
+              width: 36px;
+              height: 36px;
+            }
+          }
+
+          /* Mobile: Full width */
+          @media (max-width: 480px) {
+            .cambridge-reference-panel {
+              width: 100vw;
+            }
+
+            .tab {
+              padding: 10px 6px;
+            }
+
+            .tab-icon {
+              font-size: 16px;
+            }
+
+            .panel-header {
+              padding: 12px;
+            }
+
+            .panel-header h2 {
+              font-size: 16px;
+            }
+
+            .paper-info {
+              font-size: 11px;
+            }
+
+            .zoom-controls button {
+              width: 40px;
+              height: 40px;
+            }
+
+            .zoom-level {
+              font-size: 13px;
+            }
+          }
+
+          /* Touch device optimizations (iPad, touch laptop) */
+          @media (hover: none) and (pointer: coarse) {
+            .zoom-controls button {
+              width: 40px;
+              height: 40px;
+            }
+
+            .tab {
+              padding: 14px 8px;
+            }
+
+            .close-btn {
+              padding: 8px;
+            }
+          }
+
+          /* Landscape orientation on small devices */
+          @media (max-height: 600px) {
+            .panel-header {
+              padding: 12px;
+            }
+
+            .panel-header h2 {
+              font-size: 16px;
+            }
+
+            .tab {
+              padding: 10px 6px;
+            }
+          }
+        `}</style>
+      </div>
+    </>
   );
 };
 

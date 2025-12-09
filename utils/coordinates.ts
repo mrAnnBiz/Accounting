@@ -8,17 +8,18 @@ export class AnnotationCoordinateSystem implements CoordinateSystem {
   /**
    * Convert PDF coordinates to canvas coordinates
    * PDF uses bottom-left origin, canvas uses top-left origin
+   * Note: canvasWidth/Height already include zoom, so scale is NOT multiplied here
    */
   pdfToCanvas(pdfPoint: Point, pageInfo: PageInfo): Point {
-    const { pdfWidth, pdfHeight, canvasWidth, canvasHeight, scale, offsetX, offsetY } = pageInfo;
+    const { pdfWidth, pdfHeight, canvasWidth, canvasHeight, offsetX, offsetY } = pageInfo;
     
-    // Calculate the scaling factors
+    // Calculate the scaling factors (canvasWidth already includes zoom)
     const scaleX = canvasWidth / pdfWidth;
     const scaleY = canvasHeight / pdfHeight;
     
     // Convert PDF coordinate (bottom-left origin) to canvas coordinate (top-left origin)
-    const canvasX = (pdfPoint.x * scaleX * scale) + offsetX;
-    const canvasY = (pdfHeight - pdfPoint.y) * scaleY * scale + offsetY;
+    const canvasX = (pdfPoint.x * scaleX) + offsetX;
+    const canvasY = (pdfHeight - pdfPoint.y) * scaleY + offsetY;
     
     return {
       x: canvasX,
@@ -30,17 +31,18 @@ export class AnnotationCoordinateSystem implements CoordinateSystem {
   /**
    * Convert canvas coordinates to PDF coordinates
    * Canvas uses top-left origin, PDF uses bottom-left origin
+   * Note: canvasWidth/Height already include zoom, so scale is NOT used here
    */
   canvasToPdf(canvasPoint: Point, pageInfo: PageInfo): Point {
-    const { pdfWidth, pdfHeight, canvasWidth, canvasHeight, scale, offsetX, offsetY } = pageInfo;
+    const { pdfWidth, pdfHeight, canvasWidth, canvasHeight, offsetX, offsetY } = pageInfo;
     
-    // Calculate the scaling factors
+    // Calculate the scaling factors (canvasWidth already includes zoom)
     const scaleX = canvasWidth / pdfWidth;
     const scaleY = canvasHeight / pdfHeight;
     
-    // Remove offsets and scale
-    const normalizedX = (canvasPoint.x - offsetX) / (scaleX * scale);
-    const normalizedY = (canvasPoint.y - offsetY) / (scaleY * scale);
+    // Remove offsets and scale (canvasWidth already includes zoom effects)
+    const normalizedX = (canvasPoint.x - offsetX) / scaleX;
+    const normalizedY = (canvasPoint.y - offsetY) / scaleY;
     
     // Convert canvas coordinate (top-left origin) to PDF coordinate (bottom-left origin)
     const pdfX = normalizedX;

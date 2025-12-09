@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import * as pdfjsLib from 'pdfjs-dist';
 import Navbar from '@/components/Navbar';
 import TopToolbarEdge from '@/components/TopToolbarEdge';
-import ReferencePanel from '@/components/ReferencePanel';
+// import ReferencePanel from '@/components/ReferencePanel'; // Removed - functionality moved to CambridgeReferencePanel
 
 if (typeof window !== 'undefined') {
   (pdfjsLib as any).GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
@@ -362,7 +362,8 @@ export default function PDFViewerScrollable() {
           </div>
         </div>
 
-        {/* Reference Panel */}
+        {/* Reference Panel - Removed, functionality moved to CambridgeReferencePanel */}
+        {/*
         <ReferencePanel
           isOpen={isPanelOpen}
           onClose={() => setIsPanelOpen(false)}
@@ -371,6 +372,7 @@ export default function PDFViewerScrollable() {
           onMarkingSchemeChange={setLinkedMarkingScheme}
           onInsertPaperChange={setLinkedInsertPaper}
         />
+        */}
       </div>
     </div>
   );

@@ -9,7 +9,9 @@ import {
   RotateCcw,
   Home,
   Menu,
+  Activity,
 } from 'lucide-react';
+import { AnnotationTool } from '../types/annotations';
 
 interface TopToolbarEdgeProps {
   displayPageNum: number;
@@ -22,6 +24,12 @@ interface TopToolbarEdgeProps {
   onResetZoom: () => void;
   onGoToPage: (page: number) => void;
   onTogglePanel: () => void;
+  onTogglePerformance?: () => void;
+  showPerformanceMonitor?: boolean;
+  selectedTool?: AnnotationTool;
+  onToolSelect?: (tool: AnnotationTool) => void;
+  isAnnotationMode?: boolean;
+  onToggleAnnotationMode?: () => void;
 }
 
 export default function TopToolbarEdge({
@@ -35,6 +43,12 @@ export default function TopToolbarEdge({
   onResetZoom,
   onGoToPage,
   onTogglePanel,
+  onTogglePerformance,
+  showPerformanceMonitor = false,
+  selectedTool = 'pen',
+  onToolSelect,
+  isAnnotationMode = false,
+  onToggleAnnotationMode,
 }: TopToolbarEdgeProps) {
   const [showPageInput, setShowPageInput] = useState(false);
   const [pageInputValue, setPageInputValue] = useState('');
@@ -59,7 +73,7 @@ export default function TopToolbarEdge({
 
   return (
     <div className="bg-white border-b border-gray-200 shadow-sm">
-      <div className="flex items-center justify-between px-4 py-2">
+      <div className="flex items-center justify-between px-3 py-1.5 gap-2 flex-wrap">
         {/* Left: Navigation Controls */}
         <div className="flex items-center space-x-3">
           {/* Previous Page */}
@@ -115,19 +129,19 @@ export default function TopToolbarEdge({
         </div>
 
         {/* Center: Zoom Controls */}
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-1">
           <button
             onClick={onZoomOut}
             disabled={zoom <= 50}
-            className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="p-1.5 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             title="Zoom Out"
           >
-            <ZoomIn className="h-4 w-4 rotate-180" />
+            <ZoomIn className="h-3 w-3 rotate-180" />
           </button>
 
           <button
             onClick={onResetZoom}
-            className="px-3 py-1 text-sm border border-gray-200 rounded hover:bg-gray-50 transition-colors min-w-[60px]"
+            className="px-2 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50 transition-colors min-w-[50px]"
             title="Reset Zoom"
           >
             {zoom}%
@@ -136,21 +150,58 @@ export default function TopToolbarEdge({
           <button
             onClick={onZoomIn}
             disabled={zoom >= 200}
-            className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="p-1.5 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             title="Zoom In"
           >
-            <ZoomIn className="h-4 w-4" />
+            <ZoomIn className="h-3 w-3" />
           </button>
         </div>
 
+        {/* Center-Right: Annotation Tools (when in annotation mode) */}
+        {isAnnotationMode && onToolSelect && (
+          <div className="flex items-center space-x-1 border-l border-gray-200 pl-2">
+            {(['pen', 'highlighter', 'eraser', 'rectangle', 'circle', 'arrow', 'text'] as AnnotationTool[]).map(tool => {
+              const toolIcons: Record<string, string> = {
+                pen: '✎', highlighter: '▍', eraser: '⌫', rectangle: '▢',
+                circle: '○', arrow: '↗', line: '╱', text: 'T'
+              };
+              return (
+                <button
+                  key={tool}
+                  onClick={() => onToolSelect(tool)}
+                  className={`px-2 py-1 text-xs rounded transition-colors ${
+                    selectedTool === tool
+                      ? 'bg-blue-100 border border-blue-400 text-blue-600'
+                      : 'border border-gray-200 hover:bg-gray-50'
+                  }`}
+                  title={tool.charAt(0).toUpperCase() + tool.slice(1)}
+                >
+                  {toolIcons[tool]}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Right: Additional Controls */}
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-1 border-l border-gray-200 pl-2">
+          {onTogglePerformance && (
+            <button
+              onClick={onTogglePerformance}
+              className={`p-1.5 rounded border border-gray-200 hover:bg-gray-50 transition-colors ${
+                showPerformanceMonitor ? 'bg-blue-100 border-blue-300 text-blue-600' : ''
+              }`}
+              title="Toggle Performance Monitor"
+            >
+              <Activity className="h-3 w-3" />
+            </button>
+          )}
           <button
             onClick={onTogglePanel}
-            className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+            className="p-1.5 rounded border border-gray-200 hover:bg-gray-50 transition-colors"
             title="Toggle Reference Panel"
           >
-            <Menu className="h-4 w-4" />
+            <Menu className="h-3 w-3" />
           </button>
         </div>
       </div>

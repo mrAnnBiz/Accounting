@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import * as pdfjsLib from 'pdfjs-dist';
 import { v4 as uuidv4 } from 'uuid';
 import Navbar from '@/components/Navbar';
@@ -42,22 +42,6 @@ import { toolPreferencesManager } from '@/utils/toolPreferences';
 if (typeof window !== 'undefined') {
   (pdfjsLib as any).GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
 }
-
-// ============================================
-// CONSTANTS
-// ============================================
-const VIEWPORT_BUFFER_PX = 200;  // Buffer for page visibility detection
-const SCROLL_THROTTLE_MS = 50;   // Scroll event throttle
-const ZOOM_DEBOUNCE_MS = 150;    // Zoom change debounce
-const INITIAL_PAGES_TO_RENDER = 3;  // Pages to render on initial load
-const MEMORY_CHECK_INTERVAL = 30000;  // Memory monitoring interval
-const CACHE_CLEANUP_INTERVAL = 60000;  // Cache cleanup interval
-const DEFAULT_PAGE_WIDTH = 595;  // A4 PDF width in points
-const DEFAULT_PAGE_HEIGHT = 842; // A4 PDF height in points
-
-// ============================================
-// TYPES
-// ============================================
 
 interface PageCanvas {
   pdfCanvas: HTMLCanvasElement;
@@ -223,7 +207,7 @@ export default function EnhancedPDFViewerScrollable() {
     const containerRect = containerRef.current.getBoundingClientRect();
     const pageRect = pageElement.getBoundingClientRect();
 
-    const buffer = VIEWPORT_BUFFER_PX;
+    const buffer = 200;
     return (
       pageRect.bottom > containerRect.top - buffer &&
       pageRect.top < containerRect.bottom + buffer
@@ -261,13 +245,13 @@ export default function EnhancedPDFViewerScrollable() {
     currentPageRef.current = closestPage;
   };
 
-  // Paper param check moved after all hooks (see render section below)
-  // to avoid violating Rules of Hooks
+  // Show PDF selection if no paper specified
+  if (!paperParam) {
+    return <PDFSelection />;
+  }
 
   // Load PDF document
   useEffect(() => {
-    // Skip loading if no paper param
-    if (!paperParam) return;
 
     const loadPDF = async () => {
       try {
@@ -277,7 +261,7 @@ export default function EnhancedPDFViewerScrollable() {
         // Use direct URL for demo, or proxy for Cambridge papers
         const pdfUrl = urlParam 
           ? decodeURIComponent(urlParam)
-          : `/api/pdf-proxy?paper=${encodeURIComponent(paperParam!)}`;
+          : `/api/pdf-proxy?paper=${encodeURIComponent(paperParam)}`;
         const loadingTask = pdfjsLib.getDocument(pdfUrl);
         const pdfDoc = await loadingTask.promise;
 
@@ -301,63 +285,35 @@ export default function EnhancedPDFViewerScrollable() {
     }
   }, [totalPages, paperParam, urlParam]);
 
-  // Ensure pageAnnotations is initialized for all pages
-  useEffect(() => {
-    if (totalPages > 0 && Object.keys(pageAnnotations).length === 0) {
-      const initialPageAnnotations: { [pageNum: number]: PageAnnotationState } = {};
-      for (let i = 1; i <= totalPages; i++) {
-        if (!initialPageAnnotations[i]) {
-          initialPageAnnotations[i] = {
-            annotations: [],
-            pageInfo: {
-              pdfWidth: DEFAULT_PAGE_WIDTH,
-              pdfHeight: DEFAULT_PAGE_HEIGHT,
-              canvasWidth: 0,
-              canvasHeight: 0,
-              scale: 1,
-              offsetX: 0,
-              offsetY: 0
-            }
-          };
-        }
-      }
-      setPageAnnotations(initialPageAnnotations);
-    }
-  }, [totalPages]);
-
   // Phase 4: Performance optimization initialization
   useEffect(() => {
-    let memoryMonitor: NodeJS.Timeout | null = null;
-    let cacheCleanup: NodeJS.Timeout | null = null;
-
     const initializePerformanceOptimizations = async () => {
       try {
         // Preload core annotation tools
         await ToolLoader.preloadCoreTools();
         
         // Initialize memory monitoring
-        memoryMonitor = setInterval(() => {
+        const memoryMonitor = setInterval(() => {
           MemoryManager.monitorMemoryUsage();
-        }, MEMORY_CHECK_INTERVAL);
+        }, 30000); // Check every 30 seconds
         
         // Clear expired cache entries
-        cacheCleanup = setInterval(() => {
+        const cacheCleanup = setInterval(() => {
           annotationCache.clearExpired();
-        }, CACHE_CLEANUP_INTERVAL);
+        }, 60000); // Clean every minute
         
         console.log('Performance optimizations initialized');
+        
+        return () => {
+          clearInterval(memoryMonitor);
+          clearInterval(cacheCleanup);
+        };
       } catch (error) {
         console.error('Failed to initialize performance optimizations:', error);
       }
     };
 
     initializePerformanceOptimizations();
-
-    // Cleanup function
-    return () => {
-      if (memoryMonitor) clearInterval(memoryMonitor);
-      if (cacheCleanup) clearInterval(cacheCleanup);
-    };
   }, [annotationCache]);
 
   // Mobile optimization effects
@@ -457,19 +413,14 @@ export default function EnhancedPDFViewerScrollable() {
   }, [storageManager]);
 
   const handleExportPDF = useCallback(async () => {
-    if (!paperParam || !pdfDocRef.current) {
-      console.error('Missing required data for PDF export: paperParam or pdfDocRef');
+    if (!paperParam || !pdfDocRef.current || !urlParam) {
+      console.error('Missing required data for PDF export');
       return;
     }
     
     try {
-      // Use provided urlParam or construct from paperParam via API proxy
-      const pdfUrl = urlParam 
-        ? decodeURIComponent(urlParam)
-        : `/api/pdf-proxy?paper=${encodeURIComponent(paperParam)}`;
-      
-      console.log('Fetching PDF for export from:', pdfUrl);
-      const response = await fetch(pdfUrl);
+      console.log('Fetching PDF from URL:', urlParam);
+      const response = await fetch(urlParam);
       if (!response.ok) {
         throw new Error(`Failed to fetch PDF: ${response.status} ${response.statusText}`);
       }
@@ -482,17 +433,14 @@ export default function EnhancedPDFViewerScrollable() {
       // Initialize exporter with PDF data
       await pdfExporter.initialize(new Uint8Array(pdfArrayBuffer));
       
-      // Group annotations by page with their page info for proper coordinate conversion
-      const annotationsByPageWithInfo: { [pageNumber: number]: { annotations: Annotation[], pageInfo: PageInfo } } = {};
+      // Group annotations by page (from pageAnnotations structure)
+      const annotationsByPage: { [pageNumber: number]: Annotation[] } = {};
       Object.entries(pageAnnotations).forEach(([pageNum, pageState]) => {
         const pageNumber = parseInt(pageNum);
-        annotationsByPageWithInfo[pageNumber] = {
-          annotations: pageState.annotations,
-          pageInfo: pageState.pageInfo
-        };
+        annotationsByPage[pageNumber] = pageState.annotations;
       });
       
-      const exportResult = await pdfExporter.exportToPDFWithPageInfo(annotationsByPageWithInfo, {
+      const exportResult = await pdfExporter.exportToPDF(annotationsByPage, {
         includeAnnotations: true,
         includeMetadata: true,
         quality: 'high',
@@ -517,10 +465,7 @@ export default function EnhancedPDFViewerScrollable() {
         throw new Error('Invalid PDF data received');
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Failed to export PDF:', errorMessage);
-      // Optionally, you could set an error state here to show to the user
-      alert(`Failed to export PDF: ${errorMessage}`);
+      console.error('Failed to export PDF:', error);
     }
   }, [paperParam, urlParam, pageAnnotations, pdfExporter]);
 
@@ -547,29 +492,14 @@ export default function EnhancedPDFViewerScrollable() {
 
     pdfDocRef.current.getPage(pageNum).then((page: any) => {
       const viewport = page.getViewport({ scale: 1 });
-      const zoomFraction = zoom / 100;
+      const scale = zoom / 100;
       
-      // CRITICAL FIX: Account for actual canvas rendering scale
-      // Canvas is rendered at EXTRACTION_QUALITY * DISPLAY_QUALITY scale
-      // But displayed at CSS size (offsetWidth), which matches viewport at zoom level
-      const renderScale = EXTRACTION_QUALITY * DISPLAY_QUALITY * zoomFraction;
-      
-      // The actual canvas pixel dimensions (not CSS display size)
-      const canvasPixelWidth = viewport.width * renderScale;
-      const canvasPixelHeight = viewport.height * renderScale;
-      
-      // The CSS display dimensions (what we see on screen)
-      const canvasDisplayWidth = canvas.offsetWidth || viewport.width * zoomFraction;
-      const canvasDisplayHeight = canvas.offsetHeight || viewport.height * zoomFraction;
-      
-      // For annotation coordinates, we use display dimensions (what user sees)
-      // But scale factor accounts for the rendering resolution
       const pageInfo: PageInfo = {
         pdfWidth: viewport.width,
         pdfHeight: viewport.height,
-        canvasWidth: canvasDisplayWidth,
-        canvasHeight: canvasDisplayHeight,
-        scale: zoomFraction,
+        canvasWidth: canvas.offsetWidth,
+        canvasHeight: canvas.offsetHeight,
+        scale: scale,
         offsetX: 0,
         offsetY: 0
       };
@@ -577,7 +507,7 @@ export default function EnhancedPDFViewerScrollable() {
       setPageAnnotations(prev => ({
         ...prev,
         [pageNum]: {
-          ...(prev[pageNum] || { annotations: [] }),
+          ...prev[pageNum],
           pageInfo
         }
       }));
@@ -656,6 +586,31 @@ export default function EnhancedPDFViewerScrollable() {
   };
 
   // Annotation handlers
+  const handleAnnotationCreate = async (annotation: Annotation) => {
+    if (!annotationDocument) return;
+
+    try {
+      await annotationStorage.addAnnotation(
+        annotationDocument.pdfId, 
+        displayPageNum, 
+        annotation
+      );
+
+      // Update local state
+      setPageAnnotations(prev => ({
+        ...prev,
+        [displayPageNum]: {
+          ...prev[displayPageNum],
+          annotations: [...prev[displayPageNum].annotations, annotation]
+        }
+      }));
+
+      console.log('Annotation created:', annotation);
+    } catch (error) {
+      console.error('Failed to create annotation:', error);
+    }
+  };
+
   const handleAnnotationCreateForPage = async (annotation: Annotation, pageNum: number) => {
     if (!annotationDocument) return;
 
@@ -666,30 +621,14 @@ export default function EnhancedPDFViewerScrollable() {
         annotation
       );
 
-      // Update local state - safely handle missing page
-      setPageAnnotations(prev => {
-        const updated = { ...prev };
-        if (!updated[pageNum]) {
-          updated[pageNum] = {
-            annotations: [annotation],
-            pageInfo: {
-              pdfWidth: DEFAULT_PAGE_WIDTH,
-              pdfHeight: DEFAULT_PAGE_HEIGHT,
-              canvasWidth: 0,
-              canvasHeight: 0,
-              scale: 1,
-              offsetX: 0,
-              offsetY: 0
-            }
-          };
-        } else {
-          updated[pageNum] = {
-            ...updated[pageNum],
-            annotations: [...(updated[pageNum].annotations || []), annotation]
-          };
+      // Update local state
+      setPageAnnotations(prev => ({
+        ...prev,
+        [pageNum]: {
+          ...prev[pageNum],
+          annotations: [...prev[pageNum].annotations, annotation]
         }
-        return updated;
-      });
+      }));
 
       console.log('Annotation created for page:', pageNum, annotation);
     } catch (error) {
@@ -708,19 +647,16 @@ export default function EnhancedPDFViewerScrollable() {
         updates
       );
 
-      // Update local state - safely handle missing page
-      setPageAnnotations(prev => {
-        if (!prev[pageNum] || !prev[pageNum].annotations) return prev;
-        return {
-          ...prev,
-          [pageNum]: {
-            ...prev[pageNum],
-            annotations: prev[pageNum].annotations.map(ann =>
-              ann.id === annotationId ? { ...ann, ...updates } : ann
-            )
-          }
-        };
-      });
+      // Update local state
+      setPageAnnotations(prev => ({
+        ...prev,
+        [pageNum]: {
+          ...prev[pageNum],
+          annotations: prev[pageNum].annotations.map(ann =>
+            ann.id === annotationId ? { ...ann, ...updates } : ann
+          )
+        }
+      }));
 
       console.log('Annotation updated for page:', pageNum, annotationId);
     } catch (error) {
@@ -745,17 +681,14 @@ export default function EnhancedPDFViewerScrollable() {
         annotationId
       );
 
-      // Update local state - safely handle missing page
-      setPageAnnotations(prev => {
-        if (!prev[pageNum] || !prev[pageNum].annotations) return prev;
-        return {
-          ...prev,
-          [pageNum]: {
-            ...prev[pageNum],
-            annotations: prev[pageNum].annotations.filter(ann => ann.id !== annotationId)
-          }
-        };
-      });
+      // Update local state
+      setPageAnnotations(prev => ({
+        ...prev,
+        [pageNum]: {
+          ...prev[pageNum],
+          annotations: prev[pageNum].annotations.filter(ann => ann.id !== annotationId)
+        }
+      }));
 
       // Clear selection if deleted annotation was selected
       if (selectedAnnotationId === annotationId) {
@@ -796,12 +729,41 @@ export default function EnhancedPDFViewerScrollable() {
     }
   };
 
+  const handleAnnotationDelete = async (annotationId: string) => {
+    if (!annotationDocument) return;
+
+    try {
+      await annotationStorage.removeAnnotation(
+        annotationDocument.pdfId,
+        displayPageNum,
+        annotationId
+      );
+
+      // Update local state
+      setPageAnnotations(prev => ({
+        ...prev,
+        [displayPageNum]: {
+          ...prev[displayPageNum],
+          annotations: prev[displayPageNum].annotations.filter(ann => ann.id !== annotationId)
+        }
+      }));
+
+      // Clear selection if deleted annotation was selected
+      if (selectedAnnotationId === annotationId) {
+        setSelectedAnnotationId(null);
+      }
+
+      console.log('Annotation deleted:', annotationId);
+    } catch (error) {
+      console.error('Failed to delete annotation:', error);
+    }
+  };
+
   const handleClearAllAnnotations = async () => {
     if (!annotationDocument || !confirm('Are you sure you want to clear all annotations on this page?')) return;
 
     try {
       const currentAnnotations = pageAnnotations[displayPageNum]?.annotations || [];
-      const currentPageInfo = pageAnnotations[displayPageNum]?.pageInfo;
       
       for (const annotation of currentAnnotations) {
         await annotationStorage.removeAnnotation(
@@ -811,30 +773,14 @@ export default function EnhancedPDFViewerScrollable() {
         );
       }
 
-      // Update local state - safely preserve pageInfo and structure
-      setPageAnnotations(prev => {
-        const updated = { ...prev };
-        if (!updated[displayPageNum]) {
-          updated[displayPageNum] = {
-            annotations: [],
-            pageInfo: currentPageInfo || {
-              pdfWidth: DEFAULT_PAGE_WIDTH,
-              pdfHeight: DEFAULT_PAGE_HEIGHT,
-              canvasWidth: 0,
-              canvasHeight: 0,
-              scale: 1,
-              offsetX: 0,
-              offsetY: 0
-            }
-          };
-        } else {
-          updated[displayPageNum] = {
-            ...updated[displayPageNum],
-            annotations: []
-          };
+      // Update local state
+      setPageAnnotations(prev => ({
+        ...prev,
+        [displayPageNum]: {
+          ...prev[displayPageNum],
+          annotations: []
         }
-        return updated;
-      });
+      }));
 
       console.log('All annotations cleared for page', displayPageNum);
     } catch (error) {
@@ -892,34 +838,6 @@ export default function EnhancedPDFViewerScrollable() {
     return getCurrentPageAnnotations().find(ann => ann.id === selectedAnnotationId) || null;
   };
 
-  // Handle window resize (DevTools, orientation change, etc)
-  useEffect(() => {
-    let resizeTimeout: NodeJS.Timeout | null = null;
-
-    const handleResize = () => {
-      if (resizeTimeout) clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(() => {
-        // Always re-render the current page being viewed
-        if (currentPageRef.current) {
-          renderPage(currentPageRef.current, true);
-        }
-        
-        // Also re-render all visible pages
-        for (let i = 1; i <= totalPages; i++) {
-          if (i !== currentPageRef.current && isPageVisible(i)) {
-            renderPage(i, true); // Force re-render
-          }
-        }
-      }, 300); // Debounce resize events
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      if (resizeTimeout) clearTimeout(resizeTimeout);
-    };
-  }, [totalPages]);
-
   // Setup scroll listener
   useEffect(() => {
     const container = containerRef.current;
@@ -938,7 +856,7 @@ export default function EnhancedPDFViewerScrollable() {
           }
         }
         scrollTimeout = null;
-      }, SCROLL_THROTTLE_MS);
+      }, 50);
     };
 
     container.addEventListener('scroll', throttledScroll);
@@ -948,23 +866,19 @@ export default function EnhancedPDFViewerScrollable() {
     };
   }, [totalPages, zoom]);
 
-  // Handle zoom changes - update all visible pages and their pageInfo
+  // Handle zoom changes
   useEffect(() => {
     if (zoomDebounceRef.current) {
       clearTimeout(zoomDebounceRef.current);
     }
 
     zoomDebounceRef.current = setTimeout(() => {
-      // First update pageInfo for all visible pages to reflect new zoom
       for (let i = 1; i <= totalPages; i++) {
         if (isPageVisible(i)) {
-          // Update pageInfo immediately to reflect zoom change
-          updatePageInfo(i);
-          // Then re-render the page
           renderPage(i, true);
         }
       }
-    }, ZOOM_DEBOUNCE_MS);
+    }, 150);
 
     return () => {
       if (zoomDebounceRef.current) {
@@ -977,7 +891,7 @@ export default function EnhancedPDFViewerScrollable() {
   useEffect(() => {
     if (totalPages > 0) {
       setTimeout(() => {
-        for (let i = 1; i <= Math.min(INITIAL_PAGES_TO_RENDER, totalPages); i++) {
+        for (let i = 1; i <= Math.min(3, totalPages); i++) {
           renderPage(i);
         }
         updateCurrentPage();
@@ -1037,8 +951,8 @@ export default function EnhancedPDFViewerScrollable() {
 
   const getCurrentPageInfo = () => {
     return pageAnnotations[displayPageNum]?.pageInfo || {
-      pdfWidth: DEFAULT_PAGE_WIDTH,
-      pdfHeight: DEFAULT_PAGE_HEIGHT,
+      pdfWidth: 595,
+      pdfHeight: 842,
       canvasWidth: 0,
       canvasHeight: 0,
       scale: 1,
@@ -1053,15 +967,6 @@ export default function EnhancedPDFViewerScrollable() {
       0
     );
   };
-
-  // ============================================
-  // RENDER SECTION
-  // ============================================
-
-  // Show PDF selection if no paper specified (moved here to respect Rules of Hooks)
-  if (!paperParam) {
-    return <PDFSelection />;
-  }
 
   if (loading) {
     return (
@@ -1084,166 +989,99 @@ export default function EnhancedPDFViewerScrollable() {
 
   return (
     <>
-      <div className="fixed top-0 left-0 right-0 z-40">
+      <div className="h-screen flex flex-col bg-gray-100">
         <Navbar />
-      </div>
+      
+      <TopToolbarEdge
+        displayPageNum={displayPageNum}
+        totalPages={totalPages}
+        zoom={zoom}
+        onPrevPage={prevPage}
+        onNextPage={nextPage}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onResetZoom={resetZoom}
+        onGoToPage={goToPage}
+        onTogglePanel={() => setReferencePanelVisible(!referencePanelVisible)}
+        onTogglePerformance={() => setShowPerformanceMonitor(!showPerformanceMonitor)}
+        showPerformanceMonitor={showPerformanceMonitor}
+      />
 
-      {/* Collapsible Tools Toolbar - 40px height */}
-      <div className="fixed top-12 left-0 right-0 z-35 bg-white border-b border-gray-200">
-        <div className="h-10 px-3 flex items-center justify-center gap-2">
-          {/* Center: Tools */}
-          <div className="flex items-center justify-center gap-1">
+      {/* Main Toolbar */}
+      <div className="px-4 py-2 bg-white border-b flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={toggleAnnotationMode}
+            className={`px-4 py-2 rounded-md font-medium transition-colors ${
+              isAnnotationMode 
+                ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            {isAnnotationMode ? 'Annotation Mode: ON' : 'Enable Annotations'}
+          </button>
+
+          {/* Always visible action buttons */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={toggleAnnotationMode}
-              className={`px-3 h-8 rounded text-sm font-medium transition-colors ${
-                isAnnotationMode 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-gray-200 text-gray-700'
-              }`}
+              onClick={handleSaveSession}
+              className="px-3 py-1 bg-gray-500 text-white rounded-md hover:bg-gray-600 text-sm"
+              title="Save Session"
             >
-              {isAnnotationMode ? 'Annotations: ON' : 'Enable'}
+              Save
             </button>
-
-            {isAnnotationMode && (
-              <>
-                <div className="w-px h-4 bg-gray-300"></div>
-                {(['pen', 'highlighter', 'eraser', 'rectangle', 'circle', 'arrow', 'text'] as AnnotationTool[]).map(tool => {
-                  const toolIcons: Record<string, string> = {
-                    pen: '✎', highlighter: '▍', eraser: '⌫', rectangle: '▢',
-                    circle: '○', arrow: '↗', text: 'T'
-                  };
-                  return (
-                    <button
-                      key={tool}
-                      onClick={() => handleToolSelect(tool)}
-                      className={`w-8 h-8 text-sm rounded transition-colors flex items-center justify-center ${
-                        selectedTool === tool
-                          ? 'bg-blue-500 text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                      title={tool.charAt(0).toUpperCase() + tool.slice(1)}
-                    >
-                      {toolIcons[tool]}
-                    </button>
-                  );
-                })}
-
-                <div className="w-px h-4 bg-gray-300"></div>
-                <button
-                  onClick={handleSaveSession}
-                  className="px-3 h-8 text-sm bg-gray-500 text-white rounded hover:bg-gray-600"
-                  title="Save Session"
-                >
-                  Save
-                </button>
-                <button
-                  onClick={handleExportPDF}
-                  className="px-3 h-8 text-sm bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50"
-                  disabled={!paperParam || !pdfDocRef.current}
-                  title="Export PDF"
-                >
-                  Export
-                </button>
-              </>
-            )}
-          </div>
-
-          {/* Right: Page Number and Controls */}
-          <div className="absolute right-3 flex items-center gap-1">
+            
             <button
-              onClick={prevPage}
-              disabled={displayPageNum <= 1}
-              className="w-8 h-8 flex items-center justify-center rounded border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-50"
-              title="Previous"
+              onClick={handleExportPDF}
+              className="px-3 py-1 bg-gray-500 text-white rounded-md hover:bg-gray-600 text-sm"
+              title="Export PDF with Annotations"
             >
-              ‹
+              Export PDF
             </button>
-
-            <input
-              type="number"
-              value={displayPageNum}
-              onChange={(e) => {
-                const page = parseInt(e.target.value);
-                if (page >= 1 && page <= totalPages) goToPage(page);
-              }}
-              className="w-14 h-8 px-1 text-sm border border-gray-300 rounded text-center"
-              min="1"
-              max={totalPages}
-            />
-
-            <span className="text-sm text-gray-600">/ {totalPages}</span>
-
-            <button
-              onClick={nextPage}
-              disabled={displayPageNum >= totalPages}
-              className="w-8 h-8 flex items-center justify-center rounded border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-50"
-              title="Next"
-            >
-              ›
-            </button>
-
-            <div className="w-px h-4 bg-gray-300 mx-1"></div>
-
-            <button
-              onClick={zoomOut}
-              disabled={zoom <= 50}
-              className="w-8 h-8 flex items-center justify-center rounded border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-50"
-              title="Zoom Out"
-            >
-              −
-            </button>
-
-            <span className="text-sm text-gray-600 w-10 text-center">{zoom}%</span>
-
-            <button
-              onClick={zoomIn}
-              disabled={zoom >= 200}
-              className="w-8 h-8 flex items-center justify-center rounded border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-50"
-              title="Zoom In"
-            >
-              +
-            </button>
-
-            <button
-              onClick={resetZoom}
-              className="w-8 h-8 flex items-center justify-center rounded border border-gray-300 text-sm hover:bg-gray-100"
-              title="Reset Zoom"
-            >
-              ↺
-            </button>
-
-            <div className="w-px h-4 bg-gray-300 mx-1"></div>
-
-            <button
-              onClick={() => setShowPerformanceMonitor(!showPerformanceMonitor)}
-              className={`w-8 h-8 flex items-center justify-center rounded text-sm ${
-                showPerformanceMonitor
-                  ? 'bg-blue-100 border border-blue-400 text-blue-600'
-                  : 'border border-gray-300 hover:bg-gray-100'
-              }`}
-              title="Performance"
-            >
-              ◈
-            </button>
-
+            
             <button
               onClick={() => setReferencePanelVisible(!referencePanelVisible)}
-              className="w-8 h-8 flex items-center justify-center rounded border border-gray-300 text-sm hover:bg-gray-100"
-              title="Reference Panel"
+              className={`px-3 py-1 rounded-md text-sm transition-colors ${
+                referencePanelVisible
+                  ? 'bg-gray-600 text-white'
+                  : 'bg-gray-500 text-white hover:bg-gray-600'
+              }`}
+              title="Cambridge Reference Panel"
             >
-              ☰
+              References
             </button>
           </div>
         </div>
+        
+        {currentSessionId && (
+          <div className="text-sm text-gray-600">
+            Session: {currentSessionId.slice(-8)}
+          </div>
+        )}
       </div>
 
-      {/* Main content with adjusted top padding */}
-      <div className="fixed top-20 left-0 right-0 bottom-0 overflow-hidden bg-gray-100">
+      <div className="flex-1 flex relative">
+        {/* Annotation Toolbar */}
+        {isAnnotationMode && (
+          <AnnotationToolbar
+            selectedTool={selectedTool}
+            onToolSelect={handleToolSelect}
+            toolProperties={toolProperties}
+            onToolPropertiesChange={handleToolPropertiesChange}
+            onClearAll={handleClearAllAnnotations}
+            onExport={handleExportAnnotations}
+            onZoomIn={zoomIn}
+            onZoomOut={zoomOut}
+            onZoomReset={resetZoom}
+            zoom={zoom}
+          />
+        )}
+
         {/* PDF Viewer Container */}
         <div 
           ref={containerRef}
           className="flex-1 overflow-auto bg-gray-200"
-          style={{ height: 'calc(100vh - 80px)' }}
+          style={{ height: 'calc(100vh - 140px)' }}
         >
           <div className="py-4">
             {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
@@ -1264,30 +1102,22 @@ export default function EnhancedPDFViewerScrollable() {
                   {/* Page number overlay removed - navigation handled in top toolbar */}
 
                   {/* Annotation Canvas Overlay */}
-                  {isAnnotationMode && pageCanvas?.rendered && (() => {
-                    // Get the actual PDF canvas dimensions at render time
-                    const pdfCanvas = pageCanvas.pdfCanvas;
-                    const canvasWidth = pdfCanvas?.offsetWidth || pageCanvas.pdfCanvas.width || 0;
-                    const canvasHeight = pdfCanvas?.offsetHeight || pageCanvas.pdfCanvas.height || 0;
-                    
-                    return (
-                      <AnnotationCanvas
-                        key={`canvas-${pageNum}-${currentPageInfo.scale}-${canvasWidth}-${canvasHeight}`}
-                        width={canvasWidth}
-                        height={canvasHeight}
-                        pageInfo={currentPageInfo}
-                        annotations={currentPageAnnotations}
-                        selectedTool={selectedTool}
-                        isDrawing={false}
-                        onAnnotationCreate={(annotation) => handleAnnotationCreateForPage(annotation, pageNum)}
-                        onAnnotationUpdate={(annotationId, updates) => handleAnnotationUpdateForPage(annotationId, updates, pageNum)}
-                        onAnnotationDelete={(annotationId) => handleAnnotationDeleteForPage(annotationId, pageNum)}
-                        onAnnotationSelect={setSelectedAnnotationId}
-                        selectedAnnotationId={selectedAnnotationId}
-                        toolProperties={toolProperties}
-                      />
-                    );
-                  })()}
+                  {isAnnotationMode && pageCanvas?.rendered && (
+                    <AnnotationCanvas
+                      width={pageCanvas.pdfCanvas.offsetWidth}
+                      height={pageCanvas.pdfCanvas.offsetHeight}
+                      pageInfo={currentPageInfo}
+                      annotations={currentPageAnnotations}
+                      selectedTool={selectedTool}
+                      isDrawing={false}
+                      onAnnotationCreate={(annotation) => handleAnnotationCreateForPage(annotation, pageNum)}
+                      onAnnotationUpdate={(annotationId, updates) => handleAnnotationUpdateForPage(annotationId, updates, pageNum)}
+                      onAnnotationDelete={(annotationId) => handleAnnotationDeleteForPage(annotationId, pageNum)}
+                      onAnnotationSelect={setSelectedAnnotationId}
+                      selectedAnnotationId={selectedAnnotationId}
+                      toolProperties={toolProperties}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -1299,104 +1129,77 @@ export default function EnhancedPDFViewerScrollable() {
 
       {/* Annotation Properties Editor */}
       {isAnnotationMode && (
-        <AnnotationPropertiesEditor
-          selectedAnnotation={getSelectedAnnotation()}
-          onPropertyChange={handleAnnotationPropertyChange}
-          onClose={() => setSelectedAnnotationId(null)}
-        />
-      )}
+          <AnnotationPropertiesEditor
+            selectedAnnotation={getSelectedAnnotation()}
+            onPropertyChange={handleAnnotationPropertyChange}
+            onClose={() => setSelectedAnnotationId(null)}
+          />
+        )}
 
-      {/* Phase 4: Performance Monitor */}
-      {showPerformanceMonitor && (
-        <PerformanceMonitor
-          cache={annotationCache}
-          visiblePages={visiblePages}
-          totalAnnotations={getTotalAnnotationCount()}
-          isVisible={showPerformanceMonitor}
-        />
-      )}
+        {/* Phase 4: Performance Monitor */}
+        {showPerformanceMonitor && (
+          <PerformanceMonitor
+            cache={annotationCache}
+            visiblePages={visiblePages}
+            totalAnnotations={getTotalAnnotationCount()}
+            isVisible={showPerformanceMonitor}
+          />
+        )}
 
-      {/* Performance Indicator for Production */}
-      {!showPerformanceMonitor && (
-        <PerformanceIndicator
-          fps={60} // Would be tracked in real-time
-          memoryUsage={50} // Would be tracked in real-time
-          cacheHitRate={cacheStats.hitRate * 100}
-        />
-      )}
+        {/* Performance Indicator for Production */}
+        {!showPerformanceMonitor && (
+          <PerformanceIndicator
+            fps={60} // Would be tracked in real-time
+            memoryUsage={50} // Would be tracked in real-time
+            cacheHitRate={cacheStats.hitRate * 100}
+          />
+        )}
 
-      {/* Annotation Properties Editor */}
-      {isAnnotationMode && (
-        <AnnotationPropertiesEditor
-          selectedAnnotation={getSelectedAnnotation()}
-          onPropertyChange={handleAnnotationPropertyChange}
-          onClose={() => setSelectedAnnotationId(null)}
-        />
-      )}
-
-      {/* Phase 4: Performance Monitor */}
-      {showPerformanceMonitor && (
-        <PerformanceMonitor
-          cache={annotationCache}
-          visiblePages={visiblePages}
-          totalAnnotations={getTotalAnnotationCount()}
-          isVisible={showPerformanceMonitor}
-        />
-      )}
-
-      {/* Performance Indicator for Production */}
-      {!showPerformanceMonitor && (
-        <PerformanceIndicator
-          fps={60} // Would be tracked in real-time
-          memoryUsage={50} // Would be tracked in real-time
-          cacheHitRate={cacheStats.hitRate * 100}
-        />
-      )}
-
-      {/* Mobile Touch Gesture Handler */}
-      <TouchGestureHandler
-        onGesture={handleMobileGesture}
-        onAnnotationTouch={(point, pressure) => {
-          // Handle annotation drawing on mobile
-          if (selectedTool !== 'pan' && isAnnotationMode) {
-            // Implementation would integrate with annotation system
-          }
-        }}
-        enablePalmRejection={true}
-        enableAnnotationMode={isAnnotationMode}
-      >
-        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
-      </TouchGestureHandler>
-
-      {/* Mobile Annotation Toolbar - Phone only (not tablets/iPads) */}
-      {mobileToolbarVisible && isMobile && !isTablet && (
-        <MobileAnnotationToolbar
-          selectedTool={selectedTool}
-          onToolSelect={setSelectedTool}
-          toolProperties={toolProperties}
-          onPropertiesChange={setToolProperties}
-          onToggleAnnotationMode={() => setIsAnnotationMode(!isAnnotationMode)}
-          isAnnotationMode={isAnnotationMode}
-          annotations={getCurrentPageAnnotations()}
-          onExport={() => {
-            // Export functionality
-            console.log('Export annotations');
-          }}
-          onClear={() => {
-            // Clear annotations
-            const currentPageState = pageAnnotations[displayPageNum];
-            if (currentPageState) {
-              setPageAnnotations(prev => ({
-                ...prev,
-                [displayPageNum]: {
-                  ...currentPageState,
-                  annotations: []
-                }
-              }));
+        {/* Mobile Touch Gesture Handler */}
+        <TouchGestureHandler
+          onGesture={handleMobileGesture}
+          onAnnotationTouch={(point, pressure) => {
+            // Handle annotation drawing on mobile
+            if (selectedTool !== 'pan' && isAnnotationMode) {
+              // Implementation would integrate with annotation system
             }
           }}
-        />
-      )}
+          enablePalmRejection={true}
+          enableAnnotationMode={isAnnotationMode}
+        >
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+        </TouchGestureHandler>
+
+        {/* Mobile Annotation Toolbar */}
+        {mobileToolbarVisible && (isMobile || isTablet) && (
+          <MobileAnnotationToolbar
+            selectedTool={selectedTool}
+            onToolSelect={setSelectedTool}
+            toolProperties={toolProperties}
+            onPropertiesChange={setToolProperties}
+            onToggleAnnotationMode={() => setIsAnnotationMode(!isAnnotationMode)}
+            isAnnotationMode={isAnnotationMode}
+            annotations={getCurrentPageAnnotations()}
+            onExport={() => {
+              // Export functionality
+              console.log('Export annotations');
+            }}
+            onClear={() => {
+              // Clear annotations
+              const currentPageState = pageAnnotations[displayPageNum];
+              if (currentPageState) {
+                setPageAnnotations(prev => ({
+                  ...prev,
+                  [displayPageNum]: {
+                    ...currentPageState,
+                    annotations: []
+                  }
+                }));
+              }
+            }}
+          />
+        )}
+      </div>
 
       {/* Phase 7: 3-Tab Cambridge Reference Panel with PDF Viewer */}
       <CambridgeReferencePanel
