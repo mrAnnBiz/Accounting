@@ -1,0 +1,127 @@
+Currently, there's an annotation mode that users toggle on/off. I want annotations to be always active by default
+Answers to your question
+Should the toggle button be removed entirely? Yes
+Can users still turn it OFF if they want, or should it be permanently locked ON? Annotation mode is on, but nothing is drawn on the screen until the appropriate tool is selected. By default no tool is selected until the user does
+2. Desktop vs iPad Behavior
+Should annotations be always-on for:
+
+Both desktop and iPad? yes
+3. Drawing Interaction 
+When annotations are always on:
+
+Should users be able to scroll/pan immediately, or do they need to select a "pan tool" first? immediately ( on desptop using scroll button on up and down arrow keys ro space bar, on touch screen devices - using 1 finger)
+Currently, there's a "pan" tool option - should this still exist? NO- remove it
+Should right-click drag or two-finger drag allow panning even in annotation mode? right-click drag or two-finger drag is for zooming in and out or whatever is the deault browser setup
+4. Tool Selection
+Should a default tool be pre-selected (currently defaults to "pen")? No pre- selected default tool
+Should the toolbar be visible by default, or should it auto-hide and appear on demand? Visible all the time
+5. Mobile/Tablet Behavior
+should annotations be always-on for iPad users? Yes, but only when they have selected the appropriate tool 
+Any different behavior for touch scrolling vs stylus writing? Touch - always for scrolling - never for annotation. Stylus - for scrolling if none of the tools are selected, and annotation if a particular tool is selected
+
+Analyse it and tell me if this will cause any potential issues and we'll find solutions
+
+**Problems and solutions:**
+
+
+Potential Issues Identified
+
+ISSUE #1: Input Method Detection Conflict
+Problem: How do we distinguish between:
+Stylus (Apple Pencil) = should annotate when tool selected
+Touch finger = should ALWAYS scroll, never annotate
+Mouse = should annotate when tool selected
+Current System Risk: The canvas might not know if it's a stylus or finger, leading to:
+Accidental annotations from fingers
+Inability to scroll on iPad when stylus is being held
+Solution Required:
+Research the Stylus vs touch treatement by ipad, touchscreen laptops.
+Detect pointerType from PointerEvent (stylus vs touch)
+For touch events: BLOCK annotation, ALLOW scrolling
+For stylus/mouse: ALLOW annotation IF tool selected, ALLOW scrolling if NO tool selected
+
+
+ISSUE #2: Scroll vs Annotate State Machine
+Problem: Your requirement seems to require different behavior for stylus:
+Stylus + No tool selected = SCROLL
+Stylus + Tool selected = ANNOTATE
+Current System Risk: How does the component know if a stylus drag is "scroll intent" vs "annotation intent"?
+Solution :
+Implement a state machine: touchState = 'scrolling' | 'annotating' | 'idle'
+On stylus down + NO tool = assume scroll, activate pan mode
+On stylus down + TOOL SELECTED = annotate
+
+
+ISSUE #3: Touch Event Handling on iPad
+Problem: You want:
+1-finger touch = ALWAYS scroll, NEVER annotate
+2-finger = zoom/browser default
+But current annotation canvas might interpret 1-finger as drawing.
+Current System Risk:
+Canvas touch events might trigger drawing on 1-finger touch
+Need to completely block annotation on finger-touch events
+Solution:
+if we have pointerType Detection, then single touch event shouldn't be a confusion maybe?. as long as it is finger touch, its always for scrolling
+Only allow stylus (pointerType='pen') for annotations
+
+
+ISSUE #4: Pan Tool Removal - Navigation Impact
+Problem: You want to remove the pan tool, but users need to scroll with stylus when no tool is selected.
+Current System Risk:
+Removing pan tool means stylus still needs to work for scrolling
+Current canvas might not have native scrolling with stylus
+Solution Required:
+Don't remove pan from UI yet - make it auto-activate when no tool selected
+OR implement native stylus scrolling in canvas if available
+Stylus drag when NO tool = triggers window.scrollBy()
+so that means Pan tool will be active even when other tools are active to enable pan since there are different types of inputs
+
+ISSUE #5: Toolbar Visibility vs Canvas Space
+Problem: Toolbar "always visible" + full canvas might overlap or reduce drawing space.
+Current System Risk:
+Toolbar covers annotation area
+Canvas padding/margins not adjusted for persistent toolbar
+Solution Required:
+use fixed positioning that doesn't impact canvas (this may already be implemented, since we're already having a tool bar that is persistent)
+
+ISSUE #6: No Default Tool Edge Case
+Problem: User must select a tool first, but what if they open the viewer for the first time?
+Current System Risk:
+User expects to draw immediately - No, they dont. Every other annotation lets user select tool first, so the user knows it.
+Solution Required:
+No solution required, since this is not even a Problem, i guess?
+
+
+ISSUE #7: Scroll Direction Input Conflict
+Problem: specified multiple scroll methods:
+Desktop: scroll wheel, up/down arrow keys, spacebar
+iPad touch: 1-finger scroll
+Current System Risk:
+Spacebar might be intercepted by browser (page down)
+Arrow keys might conflict with keyboard navigation
+Need to prevent default browser behavior
+Solution:
+Use default functions for Arrow keys and spacebar, no need to alter it to anything.
+Only mouse scrolling and one finger scrolling is enough for this program
+
+ISSUE #8: Device Detection Accuracy
+Current System Risk:
+Some iPad apps can trick the system (Apple Pencil apps report as touch sometimes)
+Older iPad styluses don't have pointerType support 
+Problem: Determining "this is a stylus" vs "this is a finger" reliably is hard. - No its not. On desktop, maybe, but most touch screen devices that use styles 
+have a charged stylus that is distinctively identified from capacitive touch . Refer https://developer.apple.com/documentation/uikit/leveraging-touch-input-for-drawing-appshttps://developer.apple.com/documentation/uikit/leveraging-touch-input-for-drawing-apps
+Solution Required:
+See if its possible to identify Conductive and non conductive touch
+
+ISSUE #9: Remove Pan Tool vs UI Inconsistency
+Problem: Pan tool removal from toolbar, but functional behavior still needed for stylus scrolling.
+Current System Risk:
+Users see no "pan" option but it works anyway (confusing)
+OR it doesn't work and users can't scroll with stylus
+Solution:
+Keep it in toolbar but label it "Scroll" (always on when no tool selected)
+
+ISSUE #10: Annotation State Persistence Across Tool Changes
+Problem: User draws with pen, switches to highlighter - what happens to in-progress stroke?
+Solution: Presist tool until the stroke is completed. the new tool will be applied for the next stroke of the drawing
+

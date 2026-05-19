@@ -1,0 +1,5 @@
+Vercel: https://vercel.com/new?teamSlug=mranns-projects
+github: https://github.com/mrAnnBiz/Accounting
+domanin: anneruth.biz
+vercel app: https://accounting-chi-seven.vercel.app/
+google drivelink:https://drive.google.com/drive/u/0/folders/1G76kyCRW-IbMoZ6ENVGY-ZXC_v4f4e9r
