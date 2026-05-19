@@ -1,0 +1,11 @@
+# Exclude development files
+.env.local
+.env.development
+*.log
+
+# Exclude source files that aren't needed
+scripts/
+*.md
+
+# Note: public/papers/ should be deployed as static assets
+# Do NOT exclude public/papers/** - we need these files deployed

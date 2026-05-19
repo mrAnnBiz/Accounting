@@ -1,0 +1,36 @@
+Simple Test PDF for Annotation System
+
+This is a test document to demonstrate the Cambridge International Accounting PDF annotation system.
+
+Features to Test:
+1. Click the Text tool in the toolbar
+2. Click anywhere on this page to add text annotations
+3. Double-click existing text to edit it inline
+4. Try the pen tool for freehand drawing
+5. Use the highlighter to mark important text
+6. Select annotations to access the properties editor
+
+The annotation system includes:
+• Professional inline text editor with font controls
+• Drawing tools with pressure sensitivity
+• Shape tools (rectangles, circles, arrows)
+• Selection and editing with visual handles
+• Properties editor for detailed customization
+• Zoom controls and pan functionality
+
+This text can be highlighted, annotated, and marked up using all available tools.
+
+Cambridge International Accounting Sample Content:
+
+Double Entry Bookkeeping Principles:
+- Every transaction affects at least two accounts
+- Total debits must equal total credits
+- Assets + Expenses = Capital + Liabilities + Income
+
+Financial Statements:
+1. Income Statement (Profit & Loss)
+2. Balance Sheet (Statement of Financial Position)  
+3. Cash Flow Statement
+4. Statement of Changes in Equity
+
+Test your annotation tools on this content!
