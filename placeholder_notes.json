@@ -1,0 +1,142 @@
+{
+  "IGCSE_0452": {
+    "level": "IGCSE",
+    "code": "0452",
+    "topics": [
+      {
+        "topic": "Section A: Accounting Basics",
+        "subtopics": [
+          {
+            "id": "igcse-001",
+            "title": "What is Accounting",
+            "slug": "what-is-accounting",
+            "order": 1,
+            "summary": "Introduction to accounting, its role, and importance in business."
+          },
+          {
+            "id": "igcse-002",
+            "title": "The Accounting Equation",
+            "slug": "accounting-equation",
+            "order": 2,
+            "summary": "Assets = Liabilities + Capital. Understanding the fundamental equation."
+          },
+          {
+            "id": "igcse-003",
+            "title": "Double Entry Bookkeeping",
+            "slug": "double-entry-bookkeeping",
+            "order": 3,
+            "summary": "Recording transactions using debit and credit entries."
+          }
+        ]
+      },
+      {
+        "topic": "Section B: Recording Transactions",
+        "subtopics": [
+          {
+            "id": "igcse-004",
+            "title": "Source Documents",
+            "slug": "source-documents",
+            "order": 1,
+            "summary": "Invoices, receipts, and other primary documents."
+          },
+          {
+            "id": "igcse-005",
+            "title": "Journals and Ledgers",
+            "slug": "journals-and-ledgers",
+            "order": 2,
+            "summary": "Recording and organizing financial transactions."
+          }
+        ]
+      },
+      {
+        "topic": "Section C: Financial Statements",
+        "subtopics": [
+          {
+            "id": "igcse-006",
+            "title": "Income Statement Preparation",
+            "slug": "income-statement",
+            "order": 1,
+            "summary": "Creating profit and loss accounts."
+          },
+          {
+            "id": "igcse-007",
+            "title": "Balance Sheet",
+            "slug": "balance-sheet",
+            "order": 2,
+            "summary": "Statement of financial position."
+          }
+        ]
+      }
+    ]
+  },
+  "AL_9706": {
+    "level": "A-Level",
+    "code": "9706",
+    "topics": [
+      {
+        "topic": "Module 1: Management Accounting",
+        "subtopics": [
+          {
+            "id": "al-001",
+            "title": "Cost Classification",
+            "slug": "cost-classification",
+            "order": 1,
+            "summary": "Understanding fixed, variable, and semi-variable costs."
+          },
+          {
+            "id": "al-002",
+            "title": "Cost Behavior",
+            "slug": "cost-behavior",
+            "order": 2,
+            "summary": "How costs change with activity levels."
+          },
+          {
+            "id": "al-003",
+            "title": "Costing Methods",
+            "slug": "costing-methods",
+            "order": 3,
+            "summary": "Absorption costing, marginal costing, and ABC."
+          }
+        ]
+      },
+      {
+        "topic": "Module 2: Financial Accounting",
+        "subtopics": [
+          {
+            "id": "al-004",
+            "title": "IFRS Standards",
+            "slug": "ifrs-standards",
+            "order": 1,
+            "summary": "International Financial Reporting Standards overview."
+          },
+          {
+            "id": "al-005",
+            "title": "Consolidated Statements",
+            "slug": "consolidated-statements",
+            "order": 2,
+            "summary": "Preparing group financial statements."
+          }
+        ]
+      },
+      {
+        "topic": "Module 3: Decision Making",
+        "subtopics": [
+          {
+            "id": "al-006",
+            "title": "Relevant Costing",
+            "slug": "relevant-costing",
+            "order": 1,
+            "summary": "Using cost data for business decisions."
+          },
+          {
+            "id": "al-007",
+            "title": "CVP Analysis",
+            "slug": "cvp-analysis",
+            "order": 2,
+            "summary": "Cost-Volume-Profit analysis for planning."
+          }
+        ]
+      }
+    ]
+  }
+}
