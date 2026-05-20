@@ -45,7 +45,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   }, [isPropertiesExpanded]);
 
   const tools: { id: AnnotationTool; label: string; icon: string; cursor?: string }[] = [
-    { id: 'pan', label: 'Pan', icon: '↔', cursor: 'grab' },
+    { id: 'pan', label: 'Scroll', icon: '↔', cursor: 'grab' },
     { id: 'select', label: 'Select', icon: '⤴', cursor: 'default' },
     { id: 'pen', label: 'Pen', icon: '✎', cursor: 'crosshair' },
     { id: 'highlighter', label: 'Highlighter', icon: '▍', cursor: 'crosshair' },
