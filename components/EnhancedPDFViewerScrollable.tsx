@@ -39,8 +39,11 @@ import { PDFAnnotationExporter } from '../utils/pdfExporter';
 import { PDFAnnotationTester, createTestRunner } from '@/utils/testingValidation';
 import { toolPreferencesManager } from '@/utils/toolPreferences';
 
+// Ensure PDF worker is initialized
 if (typeof window !== 'undefined') {
-  (pdfjsLib as any).GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+  if (!(pdfjsLib as any).GlobalWorkerOptions.workerSrc) {
+    (pdfjsLib as any).GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+  }
 }
 
 // ============================================

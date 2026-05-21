@@ -18,6 +18,23 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: '/pdf.worker.min.js',
+        headers: [
+          {
+            key: 'Content-Type',
+            value: 'application/javascript',
+          },
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000',
+          },
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*',
+          },
+        ],
+      },
+      {
         source: '/papers/:path*',
         headers: [
           {
