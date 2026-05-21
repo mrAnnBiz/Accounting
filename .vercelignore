@@ -7,5 +7,8 @@
 scripts/
 *.md
 
+# Exclude documentation directory
+/Documentation/
+
 # Note: public/papers/ should be deployed as static assets
 # Do NOT exclude public/papers/** - we need these files deployed

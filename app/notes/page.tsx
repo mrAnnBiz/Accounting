@@ -78,6 +78,22 @@ export default function NotesPage() {
           </Link>
           <h1 className="text-4xl font-bold text-gray-900 mb-4">Study Notes</h1>
 
+          {/* Flowchart Button */}
+          <div className="mb-6">
+            <Link href="/notes/accounting-flowchart">
+              <motion.div
+                whileHover={{ y: -5 }}
+                className="p-6 bg-gradient-to-r from-blue-100 to-purple-100 rounded-lg border border-purple-200 hover:shadow-lg transition-all cursor-pointer flex items-center gap-4"
+              >
+                <img src="/notes/accounting-flowchart.png" alt="Accounting Flowchart" className="w-16 h-16 object-contain rounded shadow" />
+                <div>
+                  <h3 className="text-xl font-bold text-purple-800 mb-1">View Full Accounting Flowchart</h3>
+                  <p className="text-gray-700 text-sm">Visual summary of the entire accounting process</p>
+                </div>
+              </motion.div>
+            </Link>
+          </div>
+
           {/* Level Tabs */}
           <div className="flex gap-4">
             {['IGCSE_0452', 'AL_9706'].map((level) => (

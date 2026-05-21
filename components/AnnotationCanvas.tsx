@@ -334,6 +334,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   // Handle mouse/touch events for drawing and editing
   const handlePointerDown = useCallback((e: Konva.KonvaEventObject<PointerEvent>) => {
     
+    // BLOCK touch (finger) annotations - only allow stylus and mouse
+    // Touch events are for scrolling only, never for annotation
+    if (e.evt.pointerType === 'touch') {
+      return;
+    }
+    
     // Handle stage clicks for selection
     if (selectedTool === 'select') {
       handleStageClick(e);
